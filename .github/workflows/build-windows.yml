@@ -1,0 +1,33 @@
+name: Build Windows app
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements-gui.txt pytest
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+      - name: Build executable
+        run: python -m PyInstaller --noconfirm --clean TokenLedgerNative.spec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TokenLedger-Windows
+          path: dist/TokenLedger.exe
+          if-no-files-found: error

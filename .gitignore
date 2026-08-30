@@ -1,0 +1,64 @@
+# Personal usage data and local state
+.data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.log
+*.jsonl
+.env
+.env.*
+!.env.example
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+.build-venv/
+
+# Build outputs contain absolute build-machine paths
+build/
+dist/
+*.egg-info/
+*.toc
+*.pyz
+*.pkg
+*.pdb
+*.map
+xref-*.html
+
+# Local editor and OS state
+.idea/
+.vscode/
+*.user
+*.suo
+*.tmp
+*.temp
+*.bak
+*.dmp
+*.dump
+*.har
+*.trace
+*.key
+*.p12
+*.pfx
+Thumbs.db
+Desktop.ini
+
+# Local exports, screenshots and diagnostics
+exports/
+screenshots/
+captures/
+sessions/
+archived_sessions/
+transcripts/
+conversations/
+secrets/
+credentials/
+native-error.log
+token-ledger.db*

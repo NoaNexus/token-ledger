@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f4f5f7">
+    <meta name="description" content="本地优先的个人 Token 用量账本">
+    <title>Token 账本</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell" id="appShell" data-view-state="loading">
+      <header class="topbar">
+        <a class="brand" href="#overview" aria-label="Token 账本总览">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 36 36" role="img">
+              <path d="M7 8.5h22v19H7z" fill="none" stroke="currentColor" stroke-width="2"></path>
+              <path d="M12 13.5h12M12 18h8M12 22.5h12" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"></path>
+              <path d="M25.5 8.5v19" fill="none" stroke="currentColor" stroke-width="2"></path>
+            </svg>
+          </span>
+          <span class="brand-wordmark">
+            <span class="brand-name">Token 账本</span>
+            <span class="brand-subtitle">本机用量</span>
+          </span>
+        </a>
+
+        <div class="topbar-actions">
+          <div class="local-status" id="connectionStatus" role="status" aria-live="polite">
+            <span class="status-dot status-dot--loading" aria-hidden="true"></span>
+            <span id="connectionLabel">正在读取本机数据</span>
+          </div>
+          <button class="button button-primary" id="scanButton" type="button" disabled>
+            <span class="button-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" role="img">
+                <path d="M10 3.2a6.8 6.8 0 1 0 6.1 3.8" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"></path>
+                <path d="M12.7 3.2h3.8V7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7"></path>
+              </svg>
+            </span>
+            <span id="scanButtonLabel">扫描本机数据</span>
+          </button>
+        </div>
+      </header>
+
+      <main class="workspace" id="mainContent" aria-busy="true">
+        <section class="hero" aria-labelledby="pageTitle">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="eyebrow-line" aria-hidden="true"></span>本机用量工作台 <span class="eyebrow-separator">/</span> Windows</p>
+            <h1 id="pageTitle">个人 Token<br><span>用量账本</span></h1>
+            <p class="hero-description">统一核对 Codex、Claude Code 与 Antigravity：累计用量、当前窗口、模型分布、缓存命中与额度来源。</p>
+          </div>
+
+          <aside class="hero-readout" aria-label="当前观察窗口">
+            <div class="readout-topline">
+              <span class="readout-label">累计 Token · 全部历史</span>
+              <span class="readout-pip" aria-hidden="true"></span>
+            </div>
+            <strong class="readout-value mono" id="heroTotal">—</strong>
+            <span class="readout-caption" id="heroTotalMeta">等待本地扫描</span>
+            <div class="readout-rule" aria-hidden="true"><span></span></div>
+            <div class="readout-foot">
+              <span id="heroRangeLabel">当前范围：最近 30 天</span>
+              <span id="heroUpdatedLabel">未同步</span>
+            </div>
+          </aside>
+        </section>
+
+        <nav class="tab-nav" aria-label="主视图" role="tablist">
+          <button class="tab-button is-active" id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="overviewPanel" data-tab="overview">
+            <span>总览</span>
+          </button>
+          <button class="tab-button" id="tab-detail" type="button" role="tab" aria-selected="false" aria-controls="detailPanel" data-tab="detail" tabindex="-1">
+            <span>智能体详情</span>
+          </button>
+          <button class="tab-button" id="tab-diagnostics" type="button" role="tab" aria-selected="false" aria-controls="diagnosticsPanel" data-tab="diagnostics" tabindex="-1">
+            <span>数据源诊断</span>
+          </button>
+        </nav>
+
+        <section class="toolbar" aria-label="数据筛选">
+          <div class="range-group" role="group" aria-label="观察范围">
+            <span class="toolbar-label">时间范围</span>
+            <button class="range-button" type="button" data-range="1">今天</button>
+            <button class="range-button" type="button" data-range="7">7 天</button>
+            <button class="range-button is-active" type="button" data-range="30">30 天</button>
+            <button class="range-button" type="button" data-range="all">全部</button>
+          </div>
+          <label class="agent-select-wrap">
+            <span class="toolbar-label">智能体</span>
+            <select id="agentFilter" aria-label="按智能体筛选">
+              <option value="all">全部智能体</option>
+            </select>
+          </label>
+          <div class="toolbar-meta">
+            <span class="meta-key">最近扫描</span>
+            <span class="meta-value mono" id="toolbarMeta">—</span>
+          </div>
+        </section>
+
+        <div class="notice-stack" aria-live="polite">
+          <div class="notice notice-preview" id="previewNotice" hidden>
+            <span class="notice-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" role="img">
+                <path d="M10 2.8 17 6.5v7L10 17.2 3 13.5v-7l7-3.7Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.5"></path>
+                <path d="M6.3 8.3 10 10.2l3.7-1.9M10 10.2v4.1" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></path>
+              </svg>
+            </span>
+            <span><strong>预览数据</strong><span id="previewNoticeText">本地接口当前不可达，以下数字来自内置示例，不代表你的真实用量。</span></span>
+            <button class="notice-action" id="previewRetry" type="button">重新连接</button>
+          </div>
+          <div class="notice notice-info" id="diagnosticNotice" hidden>
+            <span class="notice-icon" aria-hidden="true">
+              <svg viewBox="0 0 20 20" role="img">
+                <circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
+                <path d="M10 9.2v4.4M10 6.6v.2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.7"></path>
+              </svg>
+            </span>
+            <span id="diagnosticNoticeText">诊断信息暂不可用。</span>
+          </div>
+        </div>
+
+        <div class="loading-state" id="loadingState" aria-live="polite">
+          <div class="loading-heading">
+            <span class="skeleton skeleton-kicker"></span>
+            <span class="skeleton skeleton-title"></span>
+            <span class="skeleton skeleton-copy"></span>
+          </div>
+          <div class="loading-flow skeleton"></div>
+          <div class="loading-grid">
+            <div class="skeleton skeleton-panel"></div>
+            <div class="skeleton skeleton-panel"></div>
+          </div>
+          <p class="loading-label"><span class="loading-spinner" aria-hidden="true"></span>正在读取本机日志与用量记录</p>
+        </div>
+
+        <section class="error-state" id="errorState" hidden aria-live="assertive">
+          <div class="error-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" role="img">
+              <path d="M12 3.8 21 20H3l9-16.2Z" fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="1.7"></path>
+              <path d="M12 9v5M12 17.2v.2" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="1.8"></path>
+            </svg>
+          </div>
+          <div>
+            <p class="eyebrow">读取中断</p>
+            <h2 id="errorTitle">无法读取本地仪表数据</h2>
+            <p id="errorMessage">请确认本地服务正在运行，然后重试。</p>
+          </div>
+          <button class="button button-secondary" id="errorRetry" type="button">重试连接</button>
+        </section>
+
+        <section class="tab-panel is-active" id="overviewPanel" role="tabpanel" aria-labelledby="tab-overview" data-panel="overview">
+          <div id="overviewContent"></div>
+        </section>
+        <section class="tab-panel" id="detailPanel" role="tabpanel" aria-labelledby="tab-detail" data-panel="detail" hidden>
+          <div id="detailContent"></div>
+        </section>
+        <section class="tab-panel" id="diagnosticsPanel" role="tabpanel" aria-labelledby="tab-diagnostics" data-panel="diagnostics" hidden>
+          <div id="diagnosticContent"></div>
+        </section>
+      </main>
+
+      <footer class="app-footer">
+        <span>本机 // TOKEN 账本</span>
+        <span id="footerStatus">等待数据源</span>
+        <span class="footer-right">本页只读取同源本地接口</span>
+      </footer>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    <div class="sr-only" id="liveAnnouncer" aria-live="polite"></div>
+    <script src="./app.js" defer></script>
+  </body>
+</html>
