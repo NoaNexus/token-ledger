@@ -8,8 +8,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QObject, QPointF, QRectF, Qt, QPropertyAnimation, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -118,6 +118,25 @@ def _safe_token(metrics: dict[str, Any], key: str, available: bool = True) -> st
     return compact_number(metrics.get(key))
 
 
+def _paint_cache_signature(widget: QWidget) -> tuple[int, int, float]:
+    """Describe the logical size and monitor scale used by a widget paint cache."""
+
+    return widget.width(), widget.height(), round(max(widget.devicePixelRatioF(), 1.0), 3)
+
+
+def _create_hidpi_pixmap(widget: QWidget, background: str) -> QPixmap:
+    """Create a pixmap whose backing pixels match the widget's current monitor."""
+
+    scale = max(widget.devicePixelRatioF(), 1.0)
+    pixmap = QPixmap(
+        max(1, round(widget.width() * scale)),
+        max(1, round(widget.height() * scale)),
+    )
+    pixmap.setDevicePixelRatio(scale)
+    pixmap.fill(QColor(background))
+    return pixmap
+
+
 class UiBridge(QObject):
     dashboard_ready = Signal(int, object)
     dashboard_error = Signal(str)
@@ -155,41 +174,10 @@ class MetricCard(QFrame):
 
 
 class SmoothScrollArea(QScrollArea):
-    """Pixel-based wheel scrolling with a short, interruptible 60-fps animation."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._target_value = 0
-        self._animation = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
-        self._animation.setDuration(125)
-        self._animation.setEasingCurve(QEasingCurve.OutCubic)
+    """Qt-native wheel handling for mouse wheels and precision touchpads."""
 
     def wheelEvent(self, event: Any) -> None:
-        bar = self.verticalScrollBar()
-        pixel_delta = event.pixelDelta().y()
-        angle_delta = event.angleDelta().y()
-        if pixel_delta:
-            self._animation.stop()
-            self._target_value = bar.value()
-            super().wheelEvent(event)
-            return
-        if not pixel_delta and not angle_delta:
-            super().wheelEvent(event)
-            return
-        current = bar.value()
-        running = self._animation.state() == QAbstractAnimation.Running
-        base = self._target_value if running else current
-        distance = pixel_delta if pixel_delta else (angle_delta / 120.0) * 108.0
-        self._target_value = int(max(bar.minimum(), min(base - distance, bar.maximum())))
-        if self._target_value == current:
-            event.accept()
-            return
-        self._animation.stop()
-        self._animation.setStartValue(current)
-        self._animation.setEndValue(self._target_value)
-        self._animation.setDuration(90 if pixel_delta else 125)
-        self._animation.start()
-        event.accept()
+        super().wheelEvent(event)
 
 
 class TokenFlowWidget(QWidget):
@@ -198,7 +186,7 @@ class TokenFlowWidget(QWidget):
         self.setMinimumHeight(152)
         self._values: dict[str, int] = {}
         self._paint_cache: QPixmap | None = None
-        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self._paint_cache_signature: tuple[int, int, float] | None = None
 
     def set_data(self, metrics: dict[str, Any]) -> None:
         values = {
@@ -223,12 +211,14 @@ class TokenFlowWidget(QWidget):
             )
         )
         self._paint_cache = None
+        self._paint_cache_signature = None
         self.update()
 
     def paintEvent(self, _event: Any) -> None:
-        if self._paint_cache is None or self._paint_cache.size() != self.size():
-            self._paint_cache = QPixmap(self.size())
-            self._paint_cache.fill(QColor("#F9FBFF"))
+        signature = _paint_cache_signature(self)
+        if self._paint_cache is None or self._paint_cache_signature != signature:
+            self._paint_cache = _create_hidpi_pixmap(self, "#F9FBFF")
+            self._paint_cache_signature = signature
             cache_painter = QPainter(self._paint_cache)
             self._paint_content(cache_painter)
             cache_painter.end()
@@ -237,10 +227,11 @@ class TokenFlowWidget(QWidget):
 
     def resizeEvent(self, event: Any) -> None:
         self._paint_cache = None
+        self._paint_cache_signature = None
         super().resizeEvent(event)
 
     def _paint_content(self, painter: QPainter) -> None:
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
         width = self.width()
         left, right = 18.0, 18.0
         available = max(width - left - right, 320.0)
@@ -289,7 +280,7 @@ class TrendChart(QWidget):
         self.setMinimumHeight(250)
         self._daily: list[dict[str, Any]] = []
         self._paint_cache: QPixmap | None = None
-        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self._paint_cache_signature: tuple[int, int, float] | None = None
 
     def set_data(self, daily: Iterable[dict[str, Any]]) -> None:
         updated = list(daily)
@@ -297,12 +288,14 @@ class TrendChart(QWidget):
             return
         self._daily = updated
         self._paint_cache = None
+        self._paint_cache_signature = None
         self.update()
 
     def paintEvent(self, _event: Any) -> None:
-        if self._paint_cache is None or self._paint_cache.size() != self.size():
-            self._paint_cache = QPixmap(self.size())
-            self._paint_cache.fill(QColor(SURFACE))
+        signature = _paint_cache_signature(self)
+        if self._paint_cache is None or self._paint_cache_signature != signature:
+            self._paint_cache = _create_hidpi_pixmap(self, SURFACE)
+            self._paint_cache_signature = signature
             cache_painter = QPainter(self._paint_cache)
             self._paint_content(cache_painter)
             cache_painter.end()
@@ -311,10 +304,11 @@ class TrendChart(QWidget):
 
     def resizeEvent(self, event: Any) -> None:
         self._paint_cache = None
+        self._paint_cache_signature = None
         super().resizeEvent(event)
 
     def _paint_content(self, painter: QPainter) -> None:
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing)
         width, height = self.width(), self.height()
         left, right, top, bottom = 58.0, 18.0, 18.0, 34.0
         chart_w = max(width - left - right, 10.0)
@@ -726,7 +720,6 @@ class MainWindow(QMainWindow):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        scroll.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
         content = QWidget()
         content.setObjectName("pageCanvas")
         layout = QVBoxLayout(content)
@@ -803,7 +796,7 @@ class MainWindow(QMainWindow):
         self.model_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.model_table.setFocusPolicy(Qt.NoFocus)
         self.model_table.setTextElideMode(Qt.ElideRight)
-        self.model_table.viewport().setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self.model_table.viewport().setAutoFillBackground(True)
         self.model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.model_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
@@ -983,6 +976,7 @@ class MainWindow(QMainWindow):
                 self.model_table.setRowHeight(row, 38)
         finally:
             self.model_table.setUpdatesEnabled(True)
+            self.model_table.viewport().update()
         visible_height = 42 + 38 * max(len(rows), 1)
         self.model_table.setFixedHeight(min(visible_height, 42 + 38 * 12))
 
@@ -1081,7 +1075,7 @@ QPushButton#navButton:checked {{ background: #25324A; color: white; font-weight:
 QLabel[role='privacyNote'] {{ color: #76829A; font-size: 10px; line-height: 1.5; }}
 QLabel[role='versionLabel'] {{ color: #56627A; font-family: 'Cascadia Mono'; font-size: 9px; }}
 QFrame#topbar {{ background: {SURFACE}; border-bottom: 1px solid {LINE}; }}
-QLabel[role='pageTitle'] {{ font-family: 'Segoe UI Variable Display'; font-size: 20px; font-weight: 700; }}
+QLabel[role='pageTitle'] {{ font-family: 'Microsoft YaHei UI'; font-size: 20px; font-weight: 700; }}
 QLabel[role='pageSubtitle'] {{ color: {MUTED}; font-size: 11px; }}
 QLabel[role='topStatus'] {{ color: {MUTED}; font-size: 11px; }}
 QFrame#statusDot {{ background: {GREEN}; border-radius: 4px; }}
@@ -1109,12 +1103,12 @@ QFrame#featureCard {{ background: #F9FBFF; border: 1px solid #DDE6F8; border-rad
 QLabel[role='metricLabel'] {{ color: {MUTED}; font-size: 10px; }}
 QLabel[role='metricValue'] {{ font-family: 'Cascadia Mono'; font-size: 23px; font-weight: 700; padding-top: 2px; }}
 QLabel[role='metricNote'] {{ color: {FAINT}; font-size: 9px; }}
-QLabel[role='sectionTitle'] {{ font-family: 'Segoe UI Variable Display'; font-size: 16px; font-weight: 700; }}
+QLabel[role='sectionTitle'] {{ font-family: 'Microsoft YaHei UI'; font-size: 16px; font-weight: 700; }}
 QLabel[role='sectionNote'] {{ color: {FAINT}; font-size: 10px; }}
 QTableWidget#dataTable {{ background: {SURFACE}; border: none; color: {INK}; alternate-background-color: #F8FAFC; selection-background-color: transparent; }}
 QTableWidget#dataTable::item {{ border-bottom: 1px solid #EEF1F5; padding: 6px; }}
 QHeaderView::section {{ background: #F5F7FA; color: {MUTED}; border: none; border-bottom: 1px solid {LINE}; padding: 8px; font-size: 10px; font-weight: 600; }}
-QLabel[role='agentTitle'], QLabel[role='sourceTitle'] {{ font-family: 'Segoe UI Variable Display'; font-size: 15px; font-weight: 700; }}
+QLabel[role='agentTitle'], QLabel[role='sourceTitle'] {{ font-family: 'Microsoft YaHei UI'; font-size: 15px; font-weight: 700; }}
 QLabel[role='statusPill'] {{ background: #EEF2F7; color: #68748A; border-radius: 7px; padding: 4px 7px; font-size: 9px; }}
 QLabel[role='statusPill'][status='ready'] {{ background: #E5F7F1; color: #087A60; }}
 QLabel[role='statusPill'][status='limited'], QLabel[role='statusPill'][status='partial'] {{ background: #FFF1E8; color: #B45309; }}
@@ -1157,12 +1151,14 @@ def run(argv: list[str] | None = None) -> int:
     application.setApplicationName(APP_NAME)
     application.setOrganizationName("TokenLedger")
     application.setStyle("Fusion")
+    ui_font = QFont("Microsoft YaHei UI", 10)
+    ui_font.setHintingPreference(QFont.PreferFullHinting)
+    ui_font.setStyleStrategy(QFont.PreferAntialias)
+    application.setFont(ui_font)
     application.setStyleSheet(STYLE_SHEET)
     icon_path = resource_path("assets/token-ledger.ico")
     if icon_path.is_file():
         application.setWindowIcon(QIcon(str(icon_path)))
-    if "Segoe UI Variable Display" not in QFontDatabase.families():
-        application.setFont(QFont("Microsoft YaHei UI", 10))
     window = MainWindow(
         args.user_home.expanduser().resolve(),
         args.data_dir.expanduser().resolve(),

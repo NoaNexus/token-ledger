@@ -109,6 +109,12 @@ def test_expensive_custom_charts_reuse_their_paint_cache(qt_app: QApplication) -
     qt_app.processEvents()
     assert first_flow_cache is not None
     assert flow._paint_cache is first_flow_cache
+    assert flow._paint_cache_signature == (
+        flow.width(),
+        flow.height(),
+        round(max(flow.devicePixelRatioF(), 1.0), 3),
+    )
+    assert flow._paint_cache.devicePixelRatio() == pytest.approx(max(flow.devicePixelRatioF(), 1.0))
 
     trend = TrendChart()
     trend.resize(900, 250)
@@ -121,3 +127,9 @@ def test_expensive_custom_charts_reuse_their_paint_cache(qt_app: QApplication) -
     qt_app.processEvents()
     assert first_trend_cache is not None
     assert trend._paint_cache is first_trend_cache
+    assert trend._paint_cache_signature == (
+        trend.width(),
+        trend.height(),
+        round(max(trend.devicePixelRatioF(), 1.0), 3),
+    )
+    assert trend._paint_cache.devicePixelRatio() == pytest.approx(max(trend.devicePixelRatioF(), 1.0))
