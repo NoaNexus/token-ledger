@@ -413,17 +413,28 @@ class QuotaRow(QWidget):
             self.note.setText((quota or {}).get("message") or "没有可靠的服务端额度来源")
             self.bar.setValue(0)
             self.bar.setProperty("state", "unknown")
+            self.bar.setToolTip("额度未提供")
+            self.bar.setAccessibleName("额度未提供")
             return
         remaining = quota.get("remaining_percent")
         used = quota.get("used_percent")
         if used is None and remaining is not None:
             used = 100.0 - float(remaining)
+        if remaining is None and used is not None:
+            remaining = 100.0 - float(used)
+        remaining_value = max(0.0, min(float(remaining or 0), 100.0))
+        used_value = max(0.0, min(float(used or 0), 100.0))
         title = str(quota.get("label") or "额度窗口")
         if quota.get("status") == "budget":
             title = f"{title} · 本地预算"
         self.title.setText(title)
         self.value.setText(f"剩余 {percent(remaining)}" if remaining is not None else "额度未知")
-        self.bar.setValue(int(max(0.0, min(float(used or 0), 100.0)) * 10))
+        # 蓝色表示剩余额度；QProgressBar 从左侧填充，未填充的灰色区域会随使用量
+        # 从右向左扩展。这样 100% 剩余时是完整蓝条，符合额度余额的直觉。
+        self.bar.setValue(int(remaining_value * 10))
+        quota_hint = f"蓝色为剩余 {percent(remaining_value)}，灰色为已用 {percent(used_value)}"
+        self.bar.setToolTip(quota_hint)
+        self.bar.setAccessibleName(f"{title}：{quota_hint}")
         state = "stale" if quota.get("status") == "stale" else "ready"
         self.bar.setProperty("state", state)
         notes = []
@@ -1196,7 +1207,6 @@ QLabel[role='microValue'] {{ font-size: 13px; font-weight: 700; }}
 QLabel[role='cacheValue'] {{ color: #248A3D; font-size: 12px; font-weight: 700; }}
 QProgressBar#cacheBar, QProgressBar#quotaBar {{ background: #E9E9EE; border: none; border-radius: 3px; }}
 QProgressBar#quotaBar::chunk {{ background: {BLUE}; border-radius: 3px; }}
-QProgressBar#quotaBar[state='stale']::chunk {{ background: {ORANGE}; }}
 QProgressBar#quotaBar[state='unknown']::chunk {{ background: #C7C7CC; }}
 QLabel[role='agentMeta'] {{ color: {MUTED}; background: #F5F5F7; border-radius: 7px; padding: 5px 7px; font-size: 11px; }}
 QFrame#divider {{ background: {LINE}; border: none; }}

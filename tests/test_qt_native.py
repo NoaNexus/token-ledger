@@ -91,6 +91,35 @@ def test_unknown_quota_never_looks_like_zero_percent(qt_app: QApplication) -> No
     assert "额度未提供" in text
     assert "—" in text
     assert "0.0%" not in text
+    assert row.bar.value() == 0
+
+
+@pytest.mark.parametrize(
+    ("remaining", "used", "expected_value"),
+    (
+        (100, 0, 1000),
+        (62, 38, 620),
+        (0, 100, 0),
+    ),
+)
+def test_quota_bar_fills_blue_by_remaining_percentage(
+    qt_app: QApplication,
+    remaining: int,
+    used: int,
+    expected_value: int,
+) -> None:
+    row = QuotaRow()
+    row.set_data(
+        {
+            "status": "ready",
+            "label": "5 小时窗口",
+            "remaining_percent": remaining,
+            "used_percent": used,
+        }
+    )
+    assert row.bar.value() == expected_value
+    assert f"蓝色为剩余 {remaining:.1f}%" in row.bar.toolTip()
+    assert f"灰色为已用 {used:.1f}%" in row.bar.toolTip()
 
 
 def test_estimated_source_and_token_flow_are_explicit(qt_app: QApplication) -> None:

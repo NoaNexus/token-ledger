@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "token-ledger-local"
-version = "2.2.0"
+version = "2.2.1"
 description = "Local-first Windows token usage dashboard for Codex, Claude Code, and Antigravity"
 readme = "README.md"
 requires-python = ">=3.11"
