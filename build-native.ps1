@@ -21,7 +21,7 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller 构建失败，退出代码 $LASTEXITCODE"
     }
-    Write-Host "构建完成：$ProjectDir\dist\TokenLedger.exe"
+    Write-Host "构建完成：$ProjectDir\dist\TokenLedger\TokenLedger.exe"
 }
 finally {
     Pop-Location

@@ -12,7 +12,7 @@ Token Ledger 是一个 Windows 本地优先的个人 AI Agent 用量桌面应用
 - Claude Code：模型与完整 token/cache 统计；自动读取 CC Switch 的 Claude 账户日汇总，用于恢复已经不在会话目录中的历史，并保留本机会话明细。
 - Antigravity：读取本地 transcript 中可见的用户输入、模型回复和思考文本并做本地 Token 估算；界面始终标记“估算”，不冒充 Google 官方计费值，也不伪造本地没有的模型和缓存字段。
 - 时间范围：今天、7 天、30 天、全部历史；总览和数据源页面均支持鼠标滚轮、触控板与滚动条。
-- 桌面总览：累计/范围/净用量/缓存命中、Input、Cached input、Cache write、Output、Reasoning、模型路由、额度窗口和核算说明。
+- 桌面总览：Apple 风格的浅色原生界面，以更大的中文字号展示累计/范围/净用量/缓存命中、Input、Cached input、Cache write、Output、Reasoning、模型路由、额度窗口和核算说明。
 - 流畅交互：滚轮与触控板使用 Qt 原生滚动；趋势图和 Token 流向图使用按显示器缩放倍率生成的高 DPI 绘制缓存，后台扫描状态只在变化时刷新界面。
 - 数据维度：Agent、CC Switch 路由、平台、模型。
 - 本地索引：按文件修改时间增量更新，支持手动重建。
@@ -23,7 +23,7 @@ Token Ledger 是一个 Windows 本地优先的个人 AI Agent 用量桌面应用
 直接双击：
 
 ```text
-dist\TokenLedger.exe
+dist\TokenLedger\TokenLedger.exe
 ```
 
 这是无控制台的 Windows 原生应用，不会打开命令行窗口，也不依赖浏览器或本机 Python。`launch-native.vbs` 同样可以无黑框启动；`start.bat` 检测到 exe 后也会优先打开原生版本。
@@ -91,7 +91,7 @@ python -m venv .build-venv
 .build-venv\Scripts\python.exe -m PyInstaller --noconfirm --clean TokenLedgerNative.spec
 ```
 
-打包清单会将 Qt、SQLite 和必要运行库收入 exe，用户不需要安装 Python 或 PySide6。最终输出位于 `dist\TokenLedger.exe`。
+打包清单会将 Qt、SQLite 和必要运行库放入 `dist\TokenLedger` 程序目录，用户不需要安装 Python 或 PySide6。最终入口位于 `dist\TokenLedger\TokenLedger.exe`。目录模式避免了单文件程序每次启动时解压 Qt，启动速度明显更快；移动程序时需移动整个 `TokenLedger` 文件夹。
 
 如需从 PNG 重新生成多分辨率 Windows 图标：
 
@@ -100,7 +100,7 @@ python -m pip install Pillow
 python scripts\build_icon.py
 ```
 
-推送 `v*` 标签后，GitHub Actions 会在干净的 Windows 环境运行测试并生成可下载的 `TokenLedger.exe` 构建产物。
+推送 `v*` 标签后，GitHub Actions 会在干净的 Windows 环境运行测试并生成可下载的 `TokenLedger-Windows.zip` 便携版。
 
 ## 公开仓库卫生
 

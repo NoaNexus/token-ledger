@@ -8,9 +8,10 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QRect
 from PySide6.QtWidgets import QApplication, QLabel
 
-from tokenledger.qt_native import AgentCard, QuotaRow, SourceCard, TokenFlowWidget, TrendChart
+from tokenledger.qt_native import AgentCard, QuotaRow, SourceCard, TokenFlowWidget, TrendChart, _initial_window_geometry
 
 
 @pytest.fixture(scope="module")
@@ -20,6 +21,25 @@ def qt_app() -> QApplication:
 
 def visible_text(widget: object) -> str:
     return "\n".join(label.text() for label in widget.findChildren(QLabel))
+
+
+@pytest.mark.parametrize(
+    ("available", "expected_maximum"),
+    (
+        (QRect(0, 0, 1920, 1040), (1440, 900)),
+        (QRect(0, 0, 1366, 728), (1318, 656)),
+        (QRect(1920, 0, 1024, 700), (976, 628)),
+    ),
+)
+def test_initial_window_geometry_stays_inside_taskbar_work_area(
+    available: QRect,
+    expected_maximum: tuple[int, int],
+) -> None:
+    geometry = _initial_window_geometry(available)
+    assert available.contains(geometry)
+    assert geometry.width() <= expected_maximum[0]
+    assert geometry.height() <= expected_maximum[1]
+    assert geometry.center() == available.center()
 
 
 def test_agent_card_keeps_cache_breakdown_and_quota(qt_app: QApplication) -> None:

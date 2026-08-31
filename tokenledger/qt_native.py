@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
-from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QObject, QPointF, QRect, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -40,18 +40,18 @@ from .providers import AntigravityAdapter, ClaudeAdapter, CodexAdapter
 from .scanner import ScanCoordinator
 
 
-CANVAS = "#F3F5F9"
-SIDEBAR = "#111827"
+CANVAS = "#F5F5F7"
+SIDEBAR = "#FBFBFD"
 SURFACE = "#FFFFFF"
-INK = "#111827"
-MUTED = "#667085"
-FAINT = "#98A2B3"
-LINE = "#E4E8F0"
-BLUE = "#246BFE"
-GREEN = "#19A88B"
-ORANGE = "#F07845"
-VIOLET = "#7357FF"
-RED = "#D84A4A"
+INK = "#1D1D1F"
+MUTED = "#6E6E73"
+FAINT = "#73737A"
+LINE = "#E5E5EA"
+BLUE = "#0066CC"
+GREEN = "#34C759"
+ORANGE = "#FF9F0A"
+VIOLET = "#AF52DE"
+RED = "#FF3B30"
 AGENT_COLORS = {"codex": BLUE, "claude": ORANGE, "antigravity": VIOLET}
 STATUS_LABELS = {
     "ready": "可用",
@@ -93,6 +93,14 @@ def _label(text: str, role: str = "body", parent: QWidget | None = None) -> QLab
     widget = QLabel(text, parent)
     widget.setProperty("role", role)
     return widget
+
+
+def _pixel_font(size: int, weight: QFont.Weight = QFont.Normal, family: str = "Microsoft YaHei UI") -> QFont:
+    font = QFont(family)
+    font.setPixelSize(size)
+    font.setWeight(weight)
+    font.setHintingPreference(QFont.PreferFullHinting)
+    return font
 
 
 def _card(parent: QWidget | None = None, name: str = "card") -> QFrame:
@@ -137,6 +145,16 @@ def _create_hidpi_pixmap(widget: QWidget, background: str) -> QPixmap:
     return pixmap
 
 
+def _initial_window_geometry(available: QRect) -> QRect:
+    """Fit the restored window inside the taskbar-safe desktop work area."""
+
+    width = min(1440, max(720, available.width() - 48), available.width())
+    height = min(900, max(480, available.height() - 72), available.height())
+    x = available.x() + max((available.width() - width) // 2, 0)
+    y = available.y() + max((available.height() - height) // 2, 0)
+    return QRect(x, y, width, height)
+
+
 class UiBridge(QObject):
     dashboard_ready = Signal(int, object)
     dashboard_error = Signal(str)
@@ -147,14 +165,15 @@ class MetricCard(QFrame):
         super().__init__(parent)
         self.setObjectName("metricCard")
         self.setProperty("accent", accent)
-        self.setMinimumWidth(146)
+        self.setMinimumWidth(140)
+        self.setMinimumHeight(132)
         layout = QVBoxLayout(self)
-        _set_margins(layout, 16, 14, 16, 14)
-        layout.setSpacing(4)
+        _set_margins(layout, 18, 17, 18, 17)
+        layout.setSpacing(6)
         top = QHBoxLayout()
         top.setSpacing(8)
         marker = QFrame()
-        marker.setFixedSize(7, 7)
+        marker.setFixedSize(6, 6)
         marker.setStyleSheet(f"background:{accent}; border-radius:3px;")
         top.addWidget(marker)
         top.addWidget(_label(title, "metricLabel"))
@@ -183,7 +202,7 @@ class SmoothScrollArea(QScrollArea):
 class TokenFlowWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumHeight(152)
+        self.setMinimumHeight(170)
         self._values: dict[str, int] = {}
         self._paint_cache: QPixmap | None = None
         self._paint_cache_signature: tuple[int, int, float] | None = None
@@ -217,7 +236,7 @@ class TokenFlowWidget(QWidget):
     def paintEvent(self, _event: Any) -> None:
         signature = _paint_cache_signature(self)
         if self._paint_cache is None or self._paint_cache_signature != signature:
-            self._paint_cache = _create_hidpi_pixmap(self, "#F9FBFF")
+            self._paint_cache = _create_hidpi_pixmap(self, "#F7FBFF")
             self._paint_cache_signature = signature
             cache_painter = QPainter(self._paint_cache)
             self._paint_content(cache_painter)
@@ -242,20 +261,20 @@ class TokenFlowWidget(QWidget):
             ("推理", self._values.get("reasoning", 0), VIOLET),
         )
         centers = [left + available * (index + 0.5) / len(items) for index in range(len(items))]
-        rail_y = 105.0
-        painter.setPen(QPen(QColor("#D8DEE9"), 3))
+        rail_y = 116.0
+        painter.setPen(QPen(QColor("#D9E2EE"), 3))
         painter.drawLine(QPointF(centers[0], rail_y), QPointF(centers[-1], rail_y))
-        label_font = QFont("Microsoft YaHei UI", 9)
-        value_font = QFont("Cascadia Mono", 15, QFont.DemiBold)
+        label_font = _pixel_font(13)
+        value_font = _pixel_font(23, QFont.DemiBold)
         max_value = max((item[1] for item in items), default=0) or 1
         for index, (name, value, color) in enumerate(items):
             x = centers[index]
             painter.setFont(label_font)
             painter.setPen(QColor(MUTED))
-            painter.drawText(QRectF(x - available / 9, 10, available / 4.5, 22), Qt.AlignCenter, name)
+            painter.drawText(QRectF(x - available / 9, 13, available / 4.5, 24), Qt.AlignCenter, name)
             painter.setFont(value_font)
             painter.setPen(QColor(INK))
-            painter.drawText(QRectF(x - available / 8, 36, available / 4, 34), Qt.AlignCenter, compact_number(value))
+            painter.drawText(QRectF(x - available / 8, 42, available / 4, 36), Qt.AlignCenter, compact_number(value))
             radius = 7.0 + 4.0 * (value / max_value)
             painter.setPen(QPen(QColor(SURFACE), 3))
             painter.setBrush(QColor(color))
@@ -269,15 +288,15 @@ class TokenFlowWidget(QWidget):
                     gradient.setColorAt(1, QColor(items[index + 1][2]))
                     painter.setPen(QPen(gradient, 3))
                     painter.drawLine(QPointF(start, rail_y), QPointF(end, rail_y))
-        painter.setFont(QFont("Microsoft YaHei UI", 8))
+        painter.setFont(_pixel_font(12))
         painter.setPen(QColor(FAINT))
-        painter.drawText(QRectF(left, 124, available, 20), Qt.AlignCenter, "推理 Token 已包含在输出中，不重复计入总量")
+        painter.drawText(QRectF(left, 143, available, 20), Qt.AlignCenter, "推理 Token 已包含在输出中，不重复计入总量")
 
 
 class TrendChart(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMinimumHeight(250)
+        self.setMinimumHeight(280)
         self._daily: list[dict[str, Any]] = []
         self._paint_cache: QPixmap | None = None
         self._paint_cache_signature: tuple[int, int, float] | None = None
@@ -315,7 +334,7 @@ class TrendChart(QWidget):
         chart_h = max(height - top - bottom, 10.0)
         values = [max(int(item.get("total") or 0), 0) for item in self._daily]
         maximum = max(values, default=0)
-        painter.setFont(QFont("Cascadia Mono", 8))
+        painter.setFont(_pixel_font(12))
         for index in range(4):
             y = top + chart_h * index / 3
             painter.setPen(QPen(QColor("#E7EBF2"), 1, Qt.DashLine))
@@ -324,7 +343,7 @@ class TrendChart(QWidget):
             painter.setPen(QColor(FAINT))
             painter.drawText(QRectF(0, y - 10, left - 8, 20), Qt.AlignRight | Qt.AlignVCenter, compact_number(label_value))
         if not values or maximum <= 0:
-            painter.setFont(QFont("Microsoft YaHei UI", 10))
+            painter.setFont(_pixel_font(14))
             painter.setPen(QColor(FAINT))
             painter.drawText(self.rect(), Qt.AlignCenter, "当前范围没有可绘制的 Token 用量")
             return
@@ -341,8 +360,12 @@ class TrendChart(QWidget):
         area.lineTo(QPointF(points[0].x(), top + chart_h))
         area.closeSubpath()
         gradient = QLinearGradient(0, top, 0, top + chart_h)
-        gradient.setColorAt(0, QColor(36, 107, 254, 64))
-        gradient.setColorAt(1, QColor(36, 107, 254, 0))
+        gradient_start = QColor(BLUE)
+        gradient_start.setAlpha(64)
+        gradient_end = QColor(BLUE)
+        gradient_end.setAlpha(0)
+        gradient.setColorAt(0, gradient_start)
+        gradient.setColorAt(1, gradient_end)
         painter.fillPath(area, gradient)
         painter.setPen(QPen(QColor(BLUE), 2.5))
         painter.drawPath(path)
@@ -354,7 +377,7 @@ class TrendChart(QWidget):
             painter.setBrush(QColor(BLUE))
             painter.drawEllipse(point, 4, 4)
             painter.setPen(QColor(FAINT))
-            painter.setFont(QFont("Cascadia Mono", 8))
+            painter.setFont(_pixel_font(12))
             date_text = str(self._daily[index].get("date") or "")[-5:]
             painter.drawText(QRectF(point.x() - 28, height - 25, 56, 18), Qt.AlignCenter, date_text)
 
@@ -415,11 +438,11 @@ class AgentCard(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("agentCard")
-        self.setMinimumWidth(260)
+        self.setMinimumWidth(280)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         self.layout_root = QVBoxLayout(self)
-        _set_margins(self.layout_root, 18, 16, 18, 16)
-        self.layout_root.setSpacing(12)
+        _set_margins(self.layout_root, 22, 20, 22, 20)
+        self.layout_root.setSpacing(14)
 
     def set_data(self, agent: dict[str, Any], lifetime: dict[str, Any]) -> None:
         _clear_layout(self.layout_root)
@@ -518,8 +541,8 @@ class SourceCard(QFrame):
         super().__init__(parent)
         self.setObjectName("sourceCard")
         self.layout_root = QVBoxLayout(self)
-        _set_margins(self.layout_root, 20, 18, 20, 18)
-        self.layout_root.setSpacing(10)
+        _set_margins(self.layout_root, 22, 20, 22, 20)
+        self.layout_root.setSpacing(12)
 
     def set_data(self, source: dict[str, Any]) -> None:
         _clear_layout(self.layout_root)
@@ -593,6 +616,7 @@ class MainWindow(QMainWindow):
         self.range_buttons: dict[int | None, QPushButton] = {}
         self.nav_buttons: dict[str, QPushButton] = {}
         self.metric_cards: dict[str, MetricCard] = {}
+        self._agent_cards: list[AgentCard] = []
         self._build_window()
         self._build_ui()
         self.request_dashboard()
@@ -609,8 +633,14 @@ class MainWindow(QMainWindow):
         icon_path = resource_path("assets/token-ledger.ico")
         if icon_path.is_file():
             self.setWindowIcon(QIcon(str(icon_path)))
-        self.resize(1380, 880)
-        self.setMinimumSize(1040, 680)
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            geometry = _initial_window_geometry(screen.availableGeometry())
+            self.setMinimumSize(min(1080, geometry.width()), min(640, geometry.height()))
+            self.setGeometry(geometry)
+        else:
+            self.setMinimumSize(960, 600)
+            self.resize(1280, 800)
         if sys.platform == "win32":
             try:
                 import ctypes
@@ -644,10 +674,10 @@ class MainWindow(QMainWindow):
     def _build_sidebar(self) -> QWidget:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(208)
+        sidebar.setFixedWidth(224)
         layout = QVBoxLayout(sidebar)
-        _set_margins(layout, 18, 22, 18, 18)
-        layout.setSpacing(6)
+        _set_margins(layout, 20, 24, 20, 20)
+        layout.setSpacing(7)
         brand = QHBoxLayout()
         logo = QLabel()
         logo.setObjectName("brandMark")
@@ -662,16 +692,16 @@ class MainWindow(QMainWindow):
         brand_text = QVBoxLayout()
         brand_text.setSpacing(0)
         brand_text.addWidget(_label("Token 账本", "brandTitle"))
-        brand_text.addWidget(_label("LOCAL LEDGER", "brandCaption"))
+        brand_text.addWidget(_label("个人 AI 用量", "brandCaption"))
         brand.addLayout(brand_text)
         layout.addLayout(brand)
-        layout.addSpacing(28)
-        layout.addWidget(_label("工作台", "navSection"))
-        for key, title, icon in (
-            ("overview", "用量总览", "▦"),
-            ("sources", "数据源诊断", "⌁"),
+        layout.addSpacing(30)
+        layout.addWidget(_label("浏览", "navSection"))
+        for key, title in (
+            ("overview", "用量总览"),
+            ("sources", "数据源诊断"),
         ):
-            button = QPushButton(f"{icon}    {title}")
+            button = QPushButton(title)
             button.setObjectName("navButton")
             button.setCheckable(True)
             button.setCursor(Qt.PointingHandCursor)
@@ -690,8 +720,8 @@ class MainWindow(QMainWindow):
         topbar = QFrame()
         topbar.setObjectName("topbar")
         layout = QHBoxLayout(topbar)
-        _set_margins(layout, 28, 15, 28, 15)
-        layout.setSpacing(12)
+        _set_margins(layout, 30, 17, 30, 17)
+        layout.setSpacing(13)
         heading = QVBoxLayout()
         heading.setSpacing(1)
         self.page_title = _label("用量总览", "pageTitle")
@@ -707,7 +737,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.status_dot)
         self.status_label = _label("读取本机数据", "topStatus")
         layout.addWidget(self.status_label)
-        self.scan_button = QPushButton("刷新本机数据")
+        self.scan_button = QPushButton("刷新数据")
         self.scan_button.setObjectName("primaryButton")
         self.scan_button.setCursor(Qt.PointingHandCursor)
         self.scan_button.clicked.connect(lambda: self.start_scan(True))
@@ -723,18 +753,19 @@ class MainWindow(QMainWindow):
         content = QWidget()
         content.setObjectName("pageCanvas")
         layout = QVBoxLayout(content)
-        _set_margins(layout, 28, 22, 28, 28)
-        layout.setSpacing(16)
+        _set_margins(layout, 30, 24, 30, 34)
+        layout.setSpacing(18)
         scroll.setWidget(content)
         return scroll, content, layout
 
     def _build_overview_page(self) -> SmoothScrollArea:
         scroll, _content, layout = self._scroll_page()
-        layout.addLayout(self._build_filters())
+        layout.addWidget(self._build_filters())
 
-        metrics = QGridLayout()
-        metrics.setHorizontalSpacing(10)
-        metrics.setVerticalSpacing(10)
+        summary_panel = _card(name="summaryPanel")
+        metrics = QHBoxLayout(summary_panel)
+        _set_margins(metrics, 6, 6, 6, 6)
+        metrics.setSpacing(0)
         definitions = (
             ("lifetime", "累计 Token", BLUE),
             ("range", "当前范围", INK),
@@ -744,15 +775,19 @@ class MainWindow(QMainWindow):
         )
         for index, (key, title, color) in enumerate(definitions):
             card = MetricCard(title, color)
-            metrics.addWidget(card, 0, index)
-            metrics.setColumnStretch(index, 1)
+            metrics.addWidget(card, 1)
             self.metric_cards[key] = card
-        layout.addLayout(metrics)
+            if index < len(definitions) - 1:
+                divider = QFrame()
+                divider.setObjectName("metricDivider")
+                divider.setFixedWidth(1)
+                metrics.addWidget(divider)
+        layout.addWidget(summary_panel)
 
         flow_card = _card(name="featureCard")
         flow_layout = QVBoxLayout(flow_card)
-        _set_margins(flow_layout, 20, 17, 20, 14)
-        flow_layout.setSpacing(4)
+        _set_margins(flow_layout, 22, 20, 22, 16)
+        flow_layout.setSpacing(6)
         header = QHBoxLayout()
         header.addWidget(_label("Token 流向", "sectionTitle"))
         header.addStretch(1)
@@ -765,7 +800,7 @@ class MainWindow(QMainWindow):
 
         chart_card = _card()
         chart_layout = QVBoxLayout(chart_card)
-        _set_margins(chart_layout, 20, 17, 20, 16)
+        _set_margins(chart_layout, 22, 20, 22, 18)
         chart_header = QHBoxLayout()
         chart_header.addWidget(_label("用量趋势", "sectionTitle"))
         chart_header.addStretch(1)
@@ -778,7 +813,7 @@ class MainWindow(QMainWindow):
 
         models_card = _card()
         models_layout = QVBoxLayout(models_card)
-        _set_margins(models_layout, 20, 17, 20, 18)
+        _set_margins(models_layout, 22, 20, 22, 20)
         models_header = QHBoxLayout()
         models_header.addWidget(_label("模型与路由", "sectionTitle"))
         models_header.addStretch(1)
@@ -796,6 +831,7 @@ class MainWindow(QMainWindow):
         self.model_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.model_table.setFocusPolicy(Qt.NoFocus)
         self.model_table.setTextElideMode(Qt.ElideRight)
+        self.model_table.setWordWrap(False)
         self.model_table.viewport().setAutoFillBackground(True)
         self.model_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.model_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -812,18 +848,26 @@ class MainWindow(QMainWindow):
         agents_heading.addWidget(_label("当前范围 / 全部历史 / 缓存 / 额度", "sectionNote"))
         layout.addLayout(agents_heading)
         self.agent_grid = QGridLayout()
-        self.agent_grid.setHorizontalSpacing(12)
-        self.agent_grid.setVerticalSpacing(12)
+        self.agent_grid.setHorizontalSpacing(14)
+        self.agent_grid.setVerticalSpacing(14)
         layout.addLayout(self.agent_grid)
         layout.addStretch(1)
         return scroll
 
-    def _build_filters(self) -> QHBoxLayout:
-        filters = QHBoxLayout()
-        filters.setSpacing(8)
+    def _build_filters(self) -> QFrame:
+        filter_bar = QFrame()
+        filter_bar.setObjectName("filterBar")
+        filters = QHBoxLayout(filter_bar)
+        _set_margins(filters, 12, 10, 12, 10)
+        filters.setSpacing(10)
         filters.addWidget(_label("时间范围", "filterLabel"))
         group = QButtonGroup(self)
         group.setExclusive(True)
+        segment_control = QFrame()
+        segment_control.setObjectName("segmentControl")
+        segment_layout = QHBoxLayout(segment_control)
+        _set_margins(segment_layout, 3, 3, 3, 3)
+        segment_layout.setSpacing(1)
         for value, title in ((1, "今天"), (7, "7 天"), (30, "30 天"), (None, "全部")):
             button = QPushButton(title)
             button.setObjectName("segmentButton")
@@ -831,8 +875,9 @@ class MainWindow(QMainWindow):
             button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(lambda _checked=False, days=value: self.set_range(days))
             group.addButton(button)
-            filters.addWidget(button)
+            segment_layout.addWidget(button)
             self.range_buttons[value] = button
+        filters.addWidget(segment_control)
         self.range_buttons[self.range_value].setChecked(True)
         filters.addSpacing(12)
         filters.addWidget(_label("Agent", "filterLabel"))
@@ -847,13 +892,13 @@ class MainWindow(QMainWindow):
         filters.addStretch(1)
         self.range_label = _label("最近 30 天", "rangeBadge")
         filters.addWidget(self.range_label)
-        return filters
+        return filter_bar
 
     def _build_sources_page(self) -> SmoothScrollArea:
         scroll, _content, layout = self._scroll_page()
         intro = _card(name="featureCard")
         intro_layout = QHBoxLayout(intro)
-        _set_margins(intro_layout, 20, 18, 20, 18)
+        _set_margins(intro_layout, 22, 20, 22, 20)
         copy = QVBoxLayout()
         copy.addWidget(_label("本地数据源", "sectionTitle"))
         description = _label("展示扫描位置、记录覆盖与解析状态，不读取或展示对话正文、API Key 和登录凭据。", "bodyMuted")
@@ -952,6 +997,7 @@ class MainWindow(QMainWindow):
             return
         self._model_render_key = render_key
         self.model_table.setUpdatesEnabled(False)
+        row_height = max(44, self.model_table.fontMetrics().height() + 20)
         try:
             self.model_table.setRowCount(len(rows))
             agent_names = {"codex": "Codex", "claude": "Claude Code", "antigravity": "Antigravity"}
@@ -972,13 +1018,15 @@ class MainWindow(QMainWindow):
                     cell = QTableWidgetItem(value)
                     if column in {3, 4}:
                         cell.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    cell.setToolTip(value)
                     self.model_table.setItem(row, column, cell)
-                self.model_table.setRowHeight(row, 38)
+                self.model_table.setRowHeight(row, row_height)
         finally:
             self.model_table.setUpdatesEnabled(True)
             self.model_table.viewport().update()
-        visible_height = 42 + 38 * max(len(rows), 1)
-        self.model_table.setFixedHeight(min(visible_height, 42 + 38 * 12))
+        header_height = max(46, self.model_table.horizontalHeader().sizeHint().height())
+        visible_height = header_height + row_height * max(len(rows), 1) + 2
+        self.model_table.setFixedHeight(visible_height)
 
     def _render_agents(self, agents: list[dict[str, Any]], lifetime_agents: dict[str, Any]) -> None:
         visible = agents if self.agent_value == "all" else [item for item in agents if item.get("id") == self.agent_value]
@@ -987,11 +1035,25 @@ class MainWindow(QMainWindow):
             return
         self._agent_render_key = render_key
         _clear_layout(self.agent_grid)
-        columns = 3 if len(visible) > 1 else 1
-        for index, agent in enumerate(visible):
+        self._agent_cards = []
+        for agent in visible:
             card = AgentCard()
             card.set_data(agent, lifetime_agents.get(str(agent.get("id")), {}))
+            self._agent_cards.append(card)
+        self._layout_agent_cards()
+
+    def _layout_agent_cards(self) -> None:
+        if not hasattr(self, "agent_grid") or not self._agent_cards:
+            return
+        while self.agent_grid.count():
+            self.agent_grid.takeAt(0)
+        viewport_width = self.overview_page.viewport().width() if hasattr(self, "overview_page") else self.width() - 224
+        content_width = max(viewport_width - 60, 0)
+        columns = 3 if len(self._agent_cards) >= 3 and content_width >= 880 else min(2, len(self._agent_cards))
+        for index, card in enumerate(self._agent_cards):
             self.agent_grid.addWidget(card, index // columns, index % columns)
+        for column in range(3):
+            self.agent_grid.setColumnStretch(column, 0)
         for column in range(columns):
             self.agent_grid.setColumnStretch(column, 1)
 
@@ -1056,84 +1118,98 @@ class MainWindow(QMainWindow):
     def show_error(self, message: str) -> None:
         self._set_scan_state("error", message)
 
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "agent_grid"):
+            self._layout_agent_cards()
+
     def closeEvent(self, event: Any) -> None:
         self.closing = True
         super().closeEvent(event)
 
 
 STYLE_SHEET = f"""
-* {{ font-family: 'Microsoft YaHei UI'; color: {INK}; }}
+* {{ font-family: 'Microsoft YaHei UI'; color: {INK}; font-size: 12px; }}
 QMainWindow, QWidget#appRoot, QWidget#pageCanvas {{ background: {CANVAS}; }}
-QFrame#sidebar {{ background: {SIDEBAR}; border: none; }}
-QLabel[role='brandTitle'] {{ color: white; font-size: 15px; font-weight: 700; }}
-QLabel[role='brandCaption'] {{ color: #7F8AA3; font-family: 'Cascadia Mono'; font-size: 9px; letter-spacing: 1px; }}
-QLabel#brandMark {{ background: {BLUE}; color: white; border-radius: 10px; font-family: 'Cascadia Mono'; font-size: 19px; font-weight: 700; }}
-QLabel[role='navSection'] {{ color: #74809A; font-family: 'Cascadia Mono'; font-size: 9px; text-transform: uppercase; padding: 0 8px 7px 8px; }}
-QPushButton#navButton {{ background: transparent; color: #AAB3C5; border: none; border-radius: 9px; padding: 11px 12px; text-align: left; font-size: 13px; }}
-QPushButton#navButton:hover {{ background: #1A2435; color: white; }}
-QPushButton#navButton:checked {{ background: #25324A; color: white; font-weight: 600; }}
-QLabel[role='privacyNote'] {{ color: #76829A; font-size: 10px; line-height: 1.5; }}
-QLabel[role='versionLabel'] {{ color: #56627A; font-family: 'Cascadia Mono'; font-size: 9px; }}
-QFrame#topbar {{ background: {SURFACE}; border-bottom: 1px solid {LINE}; }}
-QLabel[role='pageTitle'] {{ font-family: 'Microsoft YaHei UI'; font-size: 20px; font-weight: 700; }}
-QLabel[role='pageSubtitle'] {{ color: {MUTED}; font-size: 11px; }}
-QLabel[role='topStatus'] {{ color: {MUTED}; font-size: 11px; }}
+QToolTip {{ background: {INK}; color: white; border: none; border-radius: 6px; padding: 6px 8px; }}
+QFrame#sidebar {{ background: {SIDEBAR}; border: none; border-right: 1px solid {LINE}; }}
+QLabel[role='brandTitle'] {{ color: {INK}; font-size: 16px; font-weight: 700; }}
+QLabel[role='brandCaption'] {{ color: {MUTED}; font-size: 11px; }}
+QLabel#brandMark {{ background: {BLUE}; color: white; border-radius: 10px; font-size: 19px; font-weight: 700; }}
+QLabel[role='navSection'] {{ color: {FAINT}; font-size: 11px; font-weight: 600; padding: 0 12px 6px 12px; }}
+QPushButton#navButton {{ background: transparent; color: #515154; border: none; border-radius: 10px; padding: 12px 14px; text-align: left; font-size: 13px; }}
+QPushButton#navButton:hover {{ background: #F0F0F3; color: {INK}; }}
+QPushButton#navButton:checked {{ background: #E8F2FF; color: {BLUE}; font-weight: 700; }}
+QPushButton#navButton:focus {{ border: 1px solid #7FB3E8; padding: 11px 13px; }}
+QLabel[role='privacyNote'] {{ color: {FAINT}; font-size: 11px; }}
+QLabel[role='versionLabel'] {{ color: #8E8E93; font-size: 10px; }}
+QFrame#topbar {{ background: {SIDEBAR}; border: none; border-bottom: 1px solid {LINE}; }}
+QLabel[role='pageTitle'] {{ font-size: 24px; font-weight: 700; }}
+QLabel[role='pageSubtitle'] {{ color: {MUTED}; font-size: 13px; }}
+QLabel[role='topStatus'] {{ color: {MUTED}; font-size: 12px; }}
 QFrame#statusDot {{ background: {GREEN}; border-radius: 4px; }}
 QFrame#statusDot[state='scanning'] {{ background: {BLUE}; }}
 QFrame#statusDot[state='warning'] {{ background: {ORANGE}; }}
 QFrame#statusDot[state='error'] {{ background: {RED}; }}
-QPushButton#primaryButton {{ background: {SIDEBAR}; color: white; border: none; border-radius: 9px; padding: 9px 16px; font-weight: 600; }}
-QPushButton#primaryButton:hover {{ background: #243047; }}
-QPushButton#primaryButton:disabled {{ background: #98A2B3; }}
+QPushButton#primaryButton {{ background: {BLUE}; color: white; border: none; border-radius: 10px; padding: 10px 17px; font-size: 12px; font-weight: 700; }}
+QPushButton#primaryButton:hover {{ background: #006EE6; }}
+QPushButton#primaryButton:pressed {{ background: #005FC7; }}
+QPushButton#primaryButton:disabled {{ background: #B7D7FF; color: white; }}
+QPushButton#primaryButton:focus {{ border: 2px solid #8FC4F4; padding: 8px 15px; }}
 QScrollArea#pageScroll {{ background: {CANVAS}; border: none; }}
-QScrollBar:vertical {{ width: 10px; background: transparent; margin: 4px 2px; }}
-QScrollBar::handle:vertical {{ background: #C8CFDC; border-radius: 4px; min-height: 36px; }}
-QScrollBar::handle:vertical:hover {{ background: #AEB7C7; }}
+QScrollBar:vertical {{ width: 9px; background: transparent; margin: 5px 2px; }}
+QScrollBar::handle:vertical {{ background: #C7C7CC; border-radius: 4px; min-height: 40px; }}
+QScrollBar::handle:vertical:hover {{ background: #AEAEB2; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
-QLabel[role='filterLabel'] {{ color: {MUTED}; font-size: 10px; font-weight: 600; padding-right: 2px; }}
-QPushButton#segmentButton {{ background: transparent; color: {MUTED}; border: 1px solid transparent; border-radius: 8px; padding: 7px 11px; }}
-QPushButton#segmentButton:hover {{ background: #E9EDF4; }}
-QPushButton#segmentButton:checked {{ background: {SURFACE}; color: {INK}; border-color: #CAD2E0; font-weight: 600; }}
-QComboBox#agentCombo {{ background: {SURFACE}; border: 1px solid #D5DBE6; border-radius: 8px; padding: 7px 34px 7px 11px; min-width: 132px; }}
-QComboBox#agentCombo::drop-down {{ width: 28px; border: none; }}
-QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {LINE}; selection-background-color: #E8F0FF; padding: 5px; }}
-QLabel[role='rangeBadge'] {{ background: #E9EEF8; color: #536078; border-radius: 8px; padding: 7px 10px; font-size: 10px; }}
-QFrame#metricCard, QFrame#card, QFrame#agentCard, QFrame#sourceCard {{ background: {SURFACE}; border: 1px solid {LINE}; border-radius: 12px; }}
-QFrame#featureCard {{ background: #F9FBFF; border: 1px solid #DDE6F8; border-radius: 12px; }}
-QLabel[role='metricLabel'] {{ color: {MUTED}; font-size: 10px; }}
-QLabel[role='metricValue'] {{ font-family: 'Cascadia Mono'; font-size: 23px; font-weight: 700; padding-top: 2px; }}
-QLabel[role='metricNote'] {{ color: {FAINT}; font-size: 9px; }}
-QLabel[role='sectionTitle'] {{ font-family: 'Microsoft YaHei UI'; font-size: 16px; font-weight: 700; }}
-QLabel[role='sectionNote'] {{ color: {FAINT}; font-size: 10px; }}
+QFrame#filterBar {{ background: {SURFACE}; border: 1px solid {LINE}; border-radius: 14px; }}
+QFrame#segmentControl {{ background: #F2F2F7; border: none; border-radius: 10px; }}
+QLabel[role='filterLabel'] {{ color: {MUTED}; font-size: 12px; font-weight: 600; padding: 0 2px; }}
+QPushButton#segmentButton {{ background: transparent; color: {MUTED}; border: 1px solid transparent; border-radius: 8px; padding: 7px 12px; font-size: 12px; }}
+QPushButton#segmentButton:hover {{ color: {INK}; }}
+QPushButton#segmentButton:checked {{ background: {SURFACE}; color: {INK}; border-color: #DEDEE3; font-weight: 700; }}
+QPushButton#segmentButton:focus {{ border-color: #7FB3E8; }}
+QComboBox#agentCombo {{ background: #F7F7FA; border: 1px solid #DEDEE3; border-radius: 9px; padding: 8px 36px 8px 12px; min-width: 142px; font-size: 12px; }}
+QComboBox#agentCombo:focus {{ border: 2px solid #7FB3E8; padding: 7px 35px 7px 11px; }}
+QComboBox QAbstractItemView {{ background: {SURFACE}; border: 1px solid {LINE}; selection-background-color: #E8F2FF; selection-color: {INK}; padding: 6px; }}
+QLabel[role='rangeBadge'] {{ background: #F2F2F7; color: {MUTED}; border-radius: 9px; padding: 8px 11px; font-size: 12px; }}
+QFrame#summaryPanel, QFrame#card, QFrame#agentCard, QFrame#sourceCard {{ background: {SURFACE}; border: 1px solid {LINE}; border-radius: 18px; }}
+QFrame#metricCard {{ background: transparent; border: none; }}
+QFrame#metricDivider {{ background: {LINE}; border: none; margin-top: 14px; margin-bottom: 14px; }}
+QFrame#featureCard {{ background: #F7FBFF; border: 1px solid #DCEBFF; border-radius: 18px; }}
+QLabel[role='metricLabel'] {{ color: {MUTED}; font-size: 12px; }}
+QLabel[role='metricValue'] {{ font-size: 28px; font-weight: 700; padding-top: 1px; }}
+QLabel[role='metricNote'] {{ color: {FAINT}; font-size: 11px; }}
+QLabel[role='sectionTitle'] {{ font-size: 18px; font-weight: 700; }}
+QLabel[role='sectionNote'] {{ color: {FAINT}; font-size: 12px; }}
 QTableWidget#dataTable {{ background: {SURFACE}; border: none; color: {INK}; alternate-background-color: #F8FAFC; selection-background-color: transparent; }}
-QTableWidget#dataTable::item {{ border-bottom: 1px solid #EEF1F5; padding: 6px; }}
-QHeaderView::section {{ background: #F5F7FA; color: {MUTED}; border: none; border-bottom: 1px solid {LINE}; padding: 8px; font-size: 10px; font-weight: 600; }}
-QLabel[role='agentTitle'], QLabel[role='sourceTitle'] {{ font-family: 'Microsoft YaHei UI'; font-size: 15px; font-weight: 700; }}
-QLabel[role='statusPill'] {{ background: #EEF2F7; color: #68748A; border-radius: 7px; padding: 4px 7px; font-size: 9px; }}
-QLabel[role='statusPill'][status='ready'] {{ background: #E5F7F1; color: #087A60; }}
-QLabel[role='statusPill'][status='limited'], QLabel[role='statusPill'][status='partial'] {{ background: #FFF1E8; color: #B45309; }}
-QLabel[role='statusPill'][status='error'] {{ background: #FDECEC; color: #B42318; }}
-QLabel[role='agentTotal'] {{ font-family: 'Cascadia Mono'; font-size: 25px; font-weight: 700; }}
-QLabel[role='agentNote'], QLabel[role='lifetimeNote'] {{ color: {FAINT}; font-size: 9px; }}
-QLabel[role='microLabel'] {{ color: {MUTED}; font-size: 9px; }}
-QLabel[role='microValue'] {{ font-family: 'Cascadia Mono'; font-size: 11px; font-weight: 600; }}
-QLabel[role='cacheValue'] {{ color: {GREEN}; font-family: 'Cascadia Mono'; font-size: 10px; font-weight: 700; }}
-QProgressBar#cacheBar, QProgressBar#quotaBar {{ background: #E8ECF2; border: none; border-radius: 3px; }}
+QTableWidget#dataTable::item {{ border-bottom: 1px solid #EFEFF4; padding: 8px; font-size: 13px; }}
+QHeaderView::section {{ background: #F7F7FA; color: {MUTED}; border: none; border-bottom: 1px solid {LINE}; padding: 10px 8px; font-size: 12px; font-weight: 700; }}
+QLabel[role='agentTitle'], QLabel[role='sourceTitle'] {{ font-size: 16px; font-weight: 700; }}
+QLabel[role='statusPill'] {{ background: #F2F2F7; color: {MUTED}; border-radius: 8px; padding: 5px 8px; font-size: 11px; }}
+QLabel[role='statusPill'][status='ready'] {{ background: #EAF8EE; color: #248A3D; }}
+QLabel[role='statusPill'][status='limited'], QLabel[role='statusPill'][status='partial'] {{ background: #FFF4E5; color: #B05A00; }}
+QLabel[role='statusPill'][status='error'] {{ background: #FFEBEA; color: #D70015; }}
+QLabel[role='agentTotal'] {{ font-size: 29px; font-weight: 700; }}
+QLabel[role='agentNote'], QLabel[role='lifetimeNote'] {{ color: {FAINT}; font-size: 11px; }}
+QLabel[role='microLabel'] {{ color: {MUTED}; font-size: 12px; }}
+QLabel[role='microValue'] {{ font-size: 13px; font-weight: 700; }}
+QLabel[role='cacheValue'] {{ color: #248A3D; font-size: 12px; font-weight: 700; }}
+QProgressBar#cacheBar, QProgressBar#quotaBar {{ background: #E9E9EE; border: none; border-radius: 3px; }}
 QProgressBar#quotaBar::chunk {{ background: {BLUE}; border-radius: 3px; }}
 QProgressBar#quotaBar[state='stale']::chunk {{ background: {ORANGE}; }}
-QProgressBar#quotaBar[state='unknown']::chunk {{ background: #C8CFDC; }}
-QLabel[role='agentMeta'] {{ color: {MUTED}; background: #F4F6F9; border-radius: 6px; padding: 4px 6px; font-size: 8px; }}
+QProgressBar#quotaBar[state='unknown']::chunk {{ background: #C7C7CC; }}
+QLabel[role='agentMeta'] {{ color: {MUTED}; background: #F5F5F7; border-radius: 7px; padding: 5px 7px; font-size: 11px; }}
 QFrame#divider {{ background: {LINE}; border: none; }}
-QLabel[role='sectionMini'] {{ color: {INK}; font-size: 10px; font-weight: 700; }}
-QLabel[role='quotaTitle'] {{ color: {MUTED}; font-size: 9px; }}
-QLabel[role='quotaValue'] {{ font-family: 'Cascadia Mono'; font-size: 9px; font-weight: 700; }}
-QLabel[role='quotaNote'] {{ color: {FAINT}; font-size: 8px; }}
-QLabel[role='reconcileNote'] {{ background: #FFF7ED; color: #9A5A13; border-radius: 7px; padding: 7px; font-size: 8px; }}
-QLabel[role='bodyMuted'] {{ color: {MUTED}; font-size: 11px; }}
-QLabel[role='sourcePath'] {{ color: #43516A; background: #F4F6F9; border-radius: 7px; padding: 8px; font-family: 'Cascadia Mono'; font-size: 9px; }}
-QLabel[role='sourceCount'] {{ color: {MUTED}; font-family: 'Cascadia Mono'; font-size: 9px; }}
-QLabel[role='sourceMessage'] {{ color: {INK}; font-size: 10px; }}
-QLabel[role='sourceDetail'] {{ color: {MUTED}; background: #F8FAFC; border-radius: 7px; padding: 7px; font-size: 9px; }}
+QLabel[role='sectionMini'] {{ color: {INK}; font-size: 12px; font-weight: 700; }}
+QLabel[role='quotaTitle'] {{ color: {MUTED}; font-size: 11px; }}
+QLabel[role='quotaValue'] {{ font-size: 11px; font-weight: 700; }}
+QLabel[role='quotaNote'] {{ color: {FAINT}; font-size: 11px; }}
+QLabel[role='reconcileNote'] {{ background: #FFF6E8; color: #8A4B08; border-radius: 9px; padding: 9px; font-size: 11px; }}
+QLabel[role='bodyMuted'] {{ color: {MUTED}; font-size: 12px; }}
+QLabel[role='sourcePath'] {{ color: #3A3A3C; background: #F5F5F7; border-radius: 9px; padding: 10px; font-family: 'Cascadia Mono'; font-size: 11px; }}
+QLabel[role='sourceCount'] {{ color: {MUTED}; font-size: 11px; }}
+QLabel[role='sourceMessage'] {{ color: {INK}; font-size: 12px; }}
+QLabel[role='sourceDetail'] {{ color: {MUTED}; background: #F7F7FA; border-radius: 9px; padding: 9px; font-size: 11px; }}
 """
 
 
@@ -1151,7 +1227,7 @@ def run(argv: list[str] | None = None) -> int:
     application.setApplicationName(APP_NAME)
     application.setOrganizationName("TokenLedger")
     application.setStyle("Fusion")
-    ui_font = QFont("Microsoft YaHei UI", 10)
+    ui_font = QFont("Microsoft YaHei UI", 11)
     ui_font.setHintingPreference(QFont.PreferFullHinting)
     ui_font.setStyleStrategy(QFont.PreferAntialias)
     application.setFont(ui_font)

@@ -26,8 +26,11 @@ jobs:
         run: python -m pytest -q
       - name: Build executable
         run: python -m PyInstaller --noconfirm --clean TokenLedgerNative.spec
+      - name: Package portable app
+        shell: pwsh
+        run: Compress-Archive -Path dist/TokenLedger -DestinationPath dist/TokenLedger-Windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: TokenLedger-Windows
-          path: dist/TokenLedger.exe
+          path: dist/TokenLedger-Windows.zip
           if-no-files-found: error

@@ -5,6 +5,12 @@ set "PYTHONUTF8=1"
 set "PYTHONHOME="
 set "PYTHONPATH="
 
+if exist "%~dp0dist\TokenLedger\TokenLedger.exe" (
+    start "" "%~dp0dist\TokenLedger\TokenLedger.exe"
+    endlocal
+    exit /b 0
+)
+
 if exist "%~dp0dist\TokenLedger.exe" (
     start "" "%~dp0dist\TokenLedger.exe"
     endlocal
