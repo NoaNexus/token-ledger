@@ -177,6 +177,7 @@ def _quota_for_agent(raw: list[dict[str, Any]], now: datetime) -> tuple[dict[str
     windows: list[dict[str, Any]] = []
     for item in raw:
         output = {
+            "snapshot_id": item.get("snapshot_id"),
             "status": item["status"],
             "label": item["label"],
             "remaining_percent": item["remaining_percent"],
@@ -186,6 +187,9 @@ def _quota_for_agent(raw: list[dict[str, Any]], now: datetime) -> tuple[dict[str
             "updated_at": item["updated_at"],
             "message": item["message"],
         }
+        for extra_key in ("balance_text", "is_current", "website_url", "provider_name"):
+            if extra_key in item:
+                output[extra_key] = item[extra_key]
         resets_at = item.get("resets_at")
         if resets_at:
             try:
@@ -208,6 +212,8 @@ def _quota_for_agent(raw: list[dict[str, Any]], now: datetime) -> tuple[dict[str
 
     def _quota_sort_key(item: dict[str, Any]) -> tuple[int, int, int]:
         label = item.get("label", "")
+        if "(当前" in label or item.get("is_current"):
+            return (0, 0, 0)
         family = 0 if "Gemini" in label else (1 if "Claude" in label or "GPT" in label else 2)
         win = 0 if item.get("window_minutes") == 10080 else (1 if item.get("window_minutes") == 300 else 2)
         return (family, win, item.get("window_minutes") or 999999)
@@ -349,9 +355,9 @@ def build_dashboard(
         if provider.id == "antigravity" and not bucket:
             metric["sessions"] = int(state.get("session_count") or 0)
         quota, quota_windows = _quota_for_agent(quotas.get(provider.id, []), now)
-        if not quota and provider_metadata.get("budget_windows"):
+        if (not quota or provider.id == "claude") and provider_metadata.get("budget_windows"):
             quota_windows = list(provider_metadata["budget_windows"])
-            quota = quota_windows[0]
+            quota = quota_windows[0] if quota_windows else quota
         if not quota and provider.id != "codex":
             quota = {
                 "status": "unavailable",

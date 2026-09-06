@@ -542,10 +542,16 @@ function renderOverview(data) {
   const summary = data.summary;
   const lifetime = data.lifetime?.summary || summary;
 
-  const quotaAgent = data.agents.find((a) => a.quota && a.quota.status !== "unavailable") || data.agents[0];
+  const quotaAgent = (state.agent !== "all" ? data.agents.find((a) => a.id === state.agent) : null)
+    || data.agents.find((a) => a.quota && a.quota.status !== "unavailable")
+    || data.agents[0];
   const quota = quotaAgent?.quota;
-  const quotaAvailable = quota && quota.remaining_percent != null && quota.status !== "unavailable";
-  const quotaPercent = quotaAvailable ? absolutePercent(quota.remaining_percent) : null;
+  const quotaAvailable = quota && (quota.remaining_percent != null || quota.balance_text != null) && quota.status !== "unavailable";
+  const quotaPercent = quotaAvailable ? (absolutePercent(quota.remaining_percent) ?? (quota.balance_text ? 100 : null)) : null;
+  const quotaValDisplay = quota?.balance_text
+    ? quota.balance_text
+    : (quotaAvailable ? formatPercent(quotaPercent) : "未下发");
+  const isHealthy = quotaAvailable && (quotaPercent == null || quotaPercent >= 20);
 
   elements.overview.innerHTML = `
     <div class="overview-stack">
@@ -627,24 +633,24 @@ function renderOverview(data) {
         <div class="glass-card kpi-card">
           <div class="kpi-head">
             <span class="kpi-label">
-              <span class="kpi-dot" style="background:#F59E0B"></span>
+              <span class="kpi-dot" style="background:${isHealthy ? '#10B981' : '#F59E0B'}"></span>
               ${escapeHtml(quotaAgent?.name || "Codex")} 额度窗口
             </span>
-            <span class="pill-badge pill-badge--amber">${escapeHtml(quota?.label || "5 小时窗口")}</span>
+            <span class="pill-badge ${isHealthy ? 'pill-badge--emerald' : 'pill-badge--amber'}">${escapeHtml(quota?.label || "额度窗口")}</span>
           </div>
           <div>
             <div style="display:flex;align-items:baseline;gap:8px">
-              <span class="kpi-value mono">${quotaAvailable ? formatPercent(quotaPercent) : "未下发"}</span>
-              <span style="font-size:11px;color:${quotaAvailable && quotaPercent < 20 ? '#EF4444' : '#FBBF24'};font-weight:600">${quotaAvailable ? (quotaPercent < 20 ? '额度紧张' : '额度充裕') : '第三方代理'}</span>
+              <span class="kpi-value mono" style="color:${isHealthy ? '#34D399' : '#FBBF24'}">${quotaValDisplay}</span>
+              <span style="font-size:11px;color:${quotaAvailable ? (isHealthy ? '#34D399' : '#EF4444') : '#FBBF24'};font-weight:600">${quotaAvailable ? (isHealthy ? '额度充裕' : '额度紧张') : '第三方代理'}</span>
             </div>
             <div class="kpi-sub">
-              <span>${quotaAvailable ? escapeHtml(formatReset(quota?.resets_at)) : "服务商未返回结构化字段"}</span>
-              <span class="mono">${quotaAvailable ? "服务端直连" : "本地统计正常"}</span>
+              <span>${quota?.message ? escapeHtml(quota.message) : (quotaAvailable ? escapeHtml(formatReset(quota?.resets_at)) : "服务商未返回结构化字段")}</span>
+              <span class="mono">${quotaAvailable ? (quotaAgent?.id === "claude" ? "CC Switch 联动" : "服务端直连") : "本地统计正常"}</span>
             </div>
           </div>
           <div class="kpi-foot" style="border-top:none;padding-top:0">
             <div class="progress-bar-bg">
-              <div class="progress-bar-fill" style="background:#F59E0B;width:${quotaPercent ?? 0}%"></div>
+              <div class="progress-bar-fill" style="background:${isHealthy ? '#10B981' : '#F59E0B'};width:${quotaPercent ?? 0}%"></div>
             </div>
           </div>
         </div>
@@ -1175,8 +1181,8 @@ function agentCard(agent, lifetime = agent) {
 
 function renderCardQuota(agent) {
   const windows = (agent.quota_windows && agent.quota_windows.length > 0)
-    ? agent.quota_windows.filter((w) => w.remaining_percent != null && w.status !== "unavailable")
-    : (agent.quota && agent.quota.remaining_percent != null && agent.quota.status !== "unavailable" ? [agent.quota] : []);
+    ? agent.quota_windows.filter((w) => (w.remaining_percent != null || w.balance_text != null) && w.status !== "unavailable")
+    : (agent.quota && (agent.quota.remaining_percent != null || agent.quota.balance_text != null) && agent.quota.status !== "unavailable" ? [agent.quota] : []);
 
   if (windows.length === 0) {
     return `
@@ -1221,20 +1227,25 @@ function renderCardQuota(agent) {
     } else {
       cardWindows = windows.slice(0, 2);
     }
+  } else if (agent.id === "claude") {
+    const current = windows.find((w) => w.is_current || w.label?.includes("当前路由"));
+    cardWindows = current ? [current] : windows.slice(0, 1);
   } else {
     cardWindows = windows.slice(0, 2);
   }
 
   const itemsHtml = cardWindows.map((quota, idx) => {
     const rawRemaining = quota.remaining_percent;
-    const remaining = absolutePercent(rawRemaining) ?? 0;
-    const isExhausted = remaining <= 0;
-    const isWarning = remaining > 0 && remaining <= 25;
+    const remaining = absolutePercent(rawRemaining) ?? (quota.balance_text ? 100 : 0);
+    const isExhausted = remaining <= 0 && !quota.balance_text;
+    const isWarning = remaining > 0 && remaining <= 25 && !quota.balance_text;
 
     let valColor = "#34D399";
     let barGradient = "linear-gradient(90deg, #10B981 0%, #34D399 100%)";
     let barShadow = "0 0 8px rgba(16,185,129,0.45)";
-    let valText = `剩余 ${formatPercent(remaining)}`;
+    let valText = quota.balance_text
+      ? `剩余 ${quota.balance_text}`
+      : `剩余 ${formatPercent(remaining)}`;
 
     if (isExhausted) {
       valColor = "#F87171";
@@ -1251,9 +1262,10 @@ function renderCardQuota(agent) {
     const countdown = formatResetCountdown(quota.resets_at);
     const resetMeta = quota.resets_at
       ? `${countdown ? countdown : "重置"} · ${formatDateTime(quota.resets_at)}`
-      : (quota.message || "官方服务端窗口");
+      : (quota.message || (quota.balance_text ? "CC Switch 官方账户直连" : "官方服务端窗口"));
 
     const isLast = idx === cardWindows.length - 1;
+    const detailBtnText = agent.id === "claude" ? "查看各来源明细 →" : "查看明细 →";
 
     return `
       <div class="agent-card-quota-item" style="${idx > 0 ? 'margin-top:8px;' : ''}">
@@ -1264,14 +1276,14 @@ function renderCardQuota(agent) {
           </span>
           <span class="agent-card-quota-percent" style="color:${valColor}">${valText}</span>
         </div>
-        <div class="agent-card-quota-bar ${isExhausted ? 'is-exhausted' : ''}" title="${escapeHtml(quota.label || '')} 剩余 ${formatPercent(remaining)}">
+        <div class="agent-card-quota-bar ${isExhausted ? 'is-exhausted' : ''}" title="${escapeHtml(quota.label || '')} ${valText}">
           <div class="agent-card-quota-fill" style="width:${remaining}%;background:${barGradient};box-shadow:${barShadow}"></div>
         </div>
         <div class="agent-card-quota-foot mono">
           <span class="agent-card-quota-meta" title="${escapeHtml(quota.message || '')} (服务端快照: ${formatDateTime(quota.updated_at)})">
             ${escapeHtml(resetMeta)}
           </span>
-          ${isLast ? `<button class="link-button" type="button" data-open-agent="${escapeHtml(agent.id)}">查看明细 →</button>` : ''}
+          ${isLast ? `<button class="link-button" type="button" data-open-agent="${escapeHtml(agent.id)}">${detailBtnText}</button>` : ''}
         </div>
       </div>
     `;
@@ -1285,6 +1297,68 @@ function renderCardQuota(agent) {
 }
 
 function renderDetailQuotaWindows(focus, lastScan) {
+  // Dedicated multi-source rendering for Claude / CC Switch
+  if (focus.id === "claude" && focus.metadata?.ccswitch_providers?.length > 0) {
+    const sources = focus.metadata.ccswitch_providers;
+    const currentRoute = sources.find((s) => s.is_current) || sources[0];
+
+    const noteHtml = `
+      <div style="margin-bottom:14px;padding:12px 14px;border-radius:10px;background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.25);display:flex;align-items:flex-start;gap:10px;font-size:11px;line-height:1.5;color:var(--text-secondary)">
+        <span style="color:#FB923C;font-size:15px;line-height:1">⚡</span>
+        <div>
+          <strong style="color:var(--text-primary)">CC Switch 多模型源额度与通道状态：</strong>
+          当前系统生效路由为 <span class="pill-badge pill-badge--emerald" style="font-size:10px;vertical-align:middle;margin:0 2px">${escapeHtml(currentRoute?.name || 'DeepSeek')} (当前生效)</span>。
+          Token Ledger 自动同步 CC Switch 各上游服务商余额与通道可用性，方便您随时掌握各通道额度与充值状态。
+        </div>
+      </div>
+    `;
+
+    const sourcesHtml = sources.map((s) => {
+      const isCurrent = s.is_current;
+      const isAvailable = s.status === "fresh";
+      const isLimited = s.status === "limited";
+
+      let badgeHtml = isCurrent
+        ? `<span class="pill-badge pill-badge--emerald" style="font-size:11px">当前生效路由</span>`
+        : `<span class="pill-badge pill-badge--blue" style="font-size:10px;opacity:0.7">备用通道</span>`;
+
+      let valColor = isAvailable ? "#34D399" : (isLimited ? "#FBBF24" : "var(--text-tertiary)");
+      let bgBar = isAvailable
+        ? "linear-gradient(90deg, #10B981 0%, #34D399 100%)"
+        : (isLimited ? "linear-gradient(90deg, #F59E0B 0%, #FBBF24 100%)" : "rgba(255,255,255,0.1)");
+      let shadowBar = isAvailable ? "0 0 8px rgba(16,185,129,0.45)" : "none";
+      let barWidth = isAvailable ? (s.remaining_percent ?? 100) : (isLimited ? 25 : 0);
+
+      const linkHtml = s.website_url
+        ? `<a href="${escapeHtml(s.website_url)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#60A5FA;text-decoration:none;display:inline-flex;align-items:center;gap:3px">官网 / 控制台 ↗</a>`
+        : "";
+
+      return `
+        <div style="padding:14px 16px;border-radius:12px;background:var(--bg-subtle);border:1px solid ${isCurrent ? 'rgba(52,211,153,0.35)' : 'var(--border-subtle)'};display:flex;flex-direction:column;gap:8px;margin-bottom:10px;box-shadow:${isCurrent ? '0 0 12px rgba(16,185,129,0.08)' : 'none'}">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:12px">
+            <span style="font-weight:600;color:var(--text-primary);display:flex;align-items:center;gap:8px">
+              <span class="kpi-dot" style="background:${valColor};box-shadow:0 0 6px ${valColor}88"></span>
+              ${escapeHtml(s.name)}
+              ${badgeHtml}
+            </span>
+            <span class="mono" style="font-weight:700;color:${valColor};font-size:13px">
+              ${escapeHtml(s.balance_text || "—")}
+            </span>
+          </div>
+          <div class="progress-bar-bg" style="height:6px;border-radius:999px">
+            <div class="progress-bar-fill" style="background:${bgBar};width:${barWidth}%;box-shadow:${shadowBar}"></div>
+          </div>
+          <div class="mono" style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-tertiary)">
+            <span>${escapeHtml(s.message || '')}</span>
+            ${linkHtml}
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    return noteHtml + sourcesHtml;
+  }
+
   const windows = (focus.quota_windows && focus.quota_windows.length > 0)
     ? focus.quota_windows
     : (focus.quota ? [focus.quota] : []);
@@ -1328,7 +1402,9 @@ function renderDetailQuotaWindows(focus, lastScan) {
     let color = "#34D399";
     let bg = "linear-gradient(90deg, #10B981 0%, #34D399 100%)";
     let shadow = "0 0 8px rgba(16,185,129,0.45)";
-    let valText = remaining != null ? `剩余 ${formatPercent(remaining)}` : "未提供";
+    let valText = w.balance_text
+      ? `剩余 ${w.balance_text}`
+      : (remaining != null ? `剩余 ${formatPercent(remaining)}` : "未提供");
 
     if (isExhausted) {
       color = "#F87171";

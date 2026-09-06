@@ -50,7 +50,7 @@ def test_native_migrates_legacy_database_with_sqlite_backup(tmp_path: Path, monk
 
 def test_native_single_instance_lifecycle() -> None:
     native.release_single_instance()
-    assert native.acquire_single_instance() is True
+    assert native.acquire_single_instance("Local\\TokenLedgerTestMutex") is True
     # Second acquisition in same process or mutex state
     # Calling release cleans handle
     native.release_single_instance()

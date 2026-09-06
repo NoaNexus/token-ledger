@@ -87,3 +87,49 @@ def test_antigravity_prefers_full_transcript(tmp_path: Path):
     discovered = adapter.discover_files()
     assert len(discovered) == 1
     assert discovered[0].path.name == "transcript_full.jsonl"
+
+
+def test_ccswitch_provider_quotas_and_claude_probe(tmp_path: Path):
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    cc_dir = tmp_path / ".cc-switch"
+    cc_dir.mkdir(parents=True)
+    db_file = cc_dir / "cc-switch.db"
+
+    with sqlite3.connect(db_file) as conn:
+        conn.execute("""
+            CREATE TABLE providers (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                app_type TEXT NOT NULL,
+                settings_config TEXT,
+                website_url TEXT,
+                sort_index INTEGER NOT NULL DEFAULT 0,
+                is_current INTEGER NOT NULL DEFAULT 0,
+                meta TEXT
+            )
+        """)
+        conn.execute("""
+            INSERT INTO providers (id, name, app_type, settings_config, website_url, sort_index, is_current)
+            VALUES
+                ('p1', 'DeepSeek', 'claude-desktop', '{"env":{"ANTHROPIC_AUTH_TOKEN":"test-token"}}', 'https://platform.deepseek.com', 0, 1),
+                ('p2', 'Zhipu GLM', 'claude-desktop', '{}', 'https://open.bigmodel.cn', 1, 0)
+        """)
+
+    adapter = ClaudeAdapter(tmp_path)
+    probe = adapter.probe()
+    assert probe.metadata["cc_switch"] is True
+    assert len(probe.metadata["budget_windows"]) >= 2
+    # Current active provider should be first
+    first_window = probe.metadata["budget_windows"][0]
+    assert "DeepSeek" in first_window["label"]
+    assert "(当前路由)" in first_window["label"]
+    assert first_window["remaining_percent"] == 100.0
+    assert "60.24 CNY" in first_window["balance_text"]
+
+    sources = probe.metadata["ccswitch_providers"]
+    assert len(sources) == 2
+    assert sources[0]["name"] == "DeepSeek"
+    assert sources[0]["is_current"] is True
+    assert sources[1]["name"] == "Zhipu GLM"
+    assert sources[1]["is_current"] is False

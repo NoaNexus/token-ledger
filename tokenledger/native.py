@@ -14,14 +14,14 @@ APP_VERSION = "2.2.1"
 _INSTANCE_HANDLE: int | None = None
 
 
-def acquire_single_instance() -> bool:
+def acquire_single_instance(mutex_name: str = "Local\\TokenLedgerNativeDesktop") -> bool:
     global _INSTANCE_HANDLE
     if sys.platform != "win32":
         return True
     try:
         import ctypes
 
-        handle = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\TokenLedgerNativeDesktop")
+        handle = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         if not handle:
             return True
         if ctypes.windll.kernel32.GetLastError() == 183:

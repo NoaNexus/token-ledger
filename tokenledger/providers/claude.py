@@ -4,13 +4,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from ..models import DiscoveredFile, ParsedFile, ProviderProbe, UsageEvent
+from ..models import DiscoveredFile, ParsedFile, ProviderProbe, QuotaSnapshot, UsageEvent
 from ..registry import descriptor
 from .base import ProviderAdapter
 from .ccswitch import (
     detect_cc_switch,
     rollup_input_total,
     safe_budget_windows,
+    safe_ccswitch_provider_quotas,
     safe_usage_rollup_summary,
     safe_usage_rollups,
     unique_model_platforms,
@@ -88,6 +89,10 @@ class ClaudeAdapter(ProviderAdapter):
                 f"；CC Switch 账户日汇总 {rollup['days']} 天"
                 f"（{rollup['start_date']}—{rollup['end_date']}）"
             )
+        budget_windows, ccswitch_sources = (
+            safe_ccswitch_provider_quotas(self.user_home) if switch.installed else ([], [])
+        )
+        all_budget_windows = safe_budget_windows(self.user_home) if switch.installed else []
         return ProviderProbe(
             status,
             "Claude Code 会话 + CC Switch 账户日汇总",
@@ -101,9 +106,10 @@ class ClaudeAdapter(ProviderAdapter):
                 "current_platform": switch.platform,
                 "account_rollup": rollup,
                 "reconciliation_policy": "同日存在 CC Switch 账户汇总时，账户汇总优先；会话日志仅补足无汇总日期",
-                "budget_windows": safe_budget_windows(self.user_home) if switch.installed else [],
+                "budget_windows": all_budget_windows,
+                "ccswitch_providers": ccswitch_sources,
                 "quota_note": (
-                    "CC Switch 的余额查询结果未写入本地数据库；配置日/月 USD 预算后可显示预算百分比"
+                    f"已接入 CC Switch 多服务商路由，当前生效通道：{switch.route}"
                     if switch.installed else ""
                 ),
             },
@@ -175,9 +181,28 @@ class ClaudeAdapter(ProviderAdapter):
         rows = safe_usage_rollups(self.user_home)
         if path.exists() and not rows:
             raise ValueError("CC Switch 账户日汇总表不可用或为空")
+        quotas: list[QuotaSnapshot] = []
+        budget_windows, _ = safe_ccswitch_provider_quotas(self.user_home)
+        for w in budget_windows:
+            if w.get("remaining_percent") is not None:
+                quotas.append(
+                    QuotaSnapshot(
+                        snapshot_id=w.get("snapshot_id") or f"claude:{w.get('label')}",
+                        agent="claude",
+                        label=w.get("label", ""),
+                        status=w.get("status", "fresh"),
+                        remaining_percent=w.get("remaining_percent"),
+                        used_percent=w.get("used_percent"),
+                        window_minutes=w.get("window_minutes"),
+                        resets_at=w.get("resets_at"),
+                        updated_at=w.get("updated_at") or "",
+                        message=w.get("message", ""),
+                    )
+                )
         result = ParsedFile(
             session_count=0,
             metadata={"usage_scope": "account_daily", "source": "CC Switch 账户日汇总"},
+            quotas=quotas,
         )
         for row in rows:
             date_value = row["date"]
