@@ -1,5 +1,5 @@
-PyQt5==5.15.7
-PyQtWebEngine==5.15.4
-psutil==5.9.0
+PyQt5>=5.15.7
+PyQtWebEngine>=5.15.6
+psutil>=5.9.0
 pyinstaller>=6.0.0
 pytest>=7.0.0
