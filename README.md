@@ -8,9 +8,9 @@ Token Ledger 是一个 Windows 本地优先的个人 AI Agent 用量桌面应用
 
 ## 第一版能力
 
-- Codex：模型、Input、Cached input、Cache write、Output、Reasoning、Total、净用量、缓存命中率，以及会话返回的服务端额度窗口。
-- Claude Code：模型与完整 token/cache 统计；自动读取 CC Switch 的 Claude 账户日汇总，用于恢复已经不在会话目录中的历史，并保留本机会话明细。
-- Antigravity：直连读取本地会话 transcript 与 SQLite 原生 Protobuf，精准解析 Google DeepMind Gemini 3.8 Flash 与 3.7 Flash 真实模型矩阵（1.69 亿主力用量与 91.8% 缓存命中）、10 大自主 Agentic 工具调用（1,718 次调度）及深度思维链（CoT），真实还原具体工程项目。详见 [Antigravity 深度规整架构文档](docs/ANTIGRAVITY_AGENTIC_INTEGRATION.md)。
+- Codex：模型、Input、Cached input、Cache write、Output、Reasoning、Total、净用量、缓存命中率，以及每周/5小时可视化额度进度条。
+- Claude Code：模型与完整 token/cache 统计；联动 CC Switch 实时呈现当前生效路由（如 DeepSeek 余额 `60.24 CNY` 与健康绿条），并在详情抽屉完整展现多渠道通道状态（智谱 GLM、阿里云百炼、Agnes、官方通道）与控制台直达链接。
+- Antigravity：直连读取本地会话 transcript 与 SQLite 原生 Protobuf，接入官方 Language Server RPC 服务，提供 Gemini 每周（如 83.8%）与 5 小时双长条额度可视化，精准还原 Gemini 3.1 Pro、3.7 Flash 与 3.8 Flash 模型矩阵。详见 [Antigravity 深度规整架构文档](docs/ANTIGRAVITY_AGENTIC_INTEGRATION.md)。
 - 时间范围：今天、7 天、30 天、全部历史；总览和数据源页面均支持鼠标滚轮、触控板与滚动条。
 - 现代化前端架构：Linear 曜石黑 + Apple 陶瓷白双主题秒切（默认深色），微透光毛玻璃卡片（Windows ClearType 零字体发虚保证）。详见 [前端架构与设计文档](docs/FRONTEND_ARCHITECTURE.md)。
 - 交互式平滑曲线：基于三次贝塞尔（Cubic Spline）的高帧率发光走势图，支持十字准星吸附与逐日精确 Token 浮动下钻。
@@ -98,6 +98,15 @@ python scripts\build_icon.py
 ```
 
 推送 `v*` 标签后，GitHub Actions 会在干净的 Windows 环境运行测试并生成可下载的 `TokenLedger-Windows.zip` 便携版。
+
+## 架构接手与开发指南
+
+后续开发者或 Codex 智能体进行系统维护与二次开发时，请参阅专门编写的交接与设计文档：
+- **[Codex 架构接手与维护指南](docs/CODEX_HANDOVER.md)**：全局架构、核心数据链路、模块职责与维护要点。
+- **[Antigravity 深度规整架构文档](docs/ANTIGRAVITY_AGENTIC_INTEGRATION.md)**：官方语言服务 RPC 额度与模型识别。
+- **[前端架构与设计文档](docs/FRONTEND_ARCHITECTURE.md)**：状态机引擎与 UI 规范。
+- **[性能与净用量说明书](docs/PERFORMANCE_AND_NET_USAGE.md)**：Token 扣减与净用量公式。
+- **[Token 多源对账重构文档](docs/TOKEN_RECONCILIATION_UPGRADE.md)**：CC Switch 与会话日志双源归并策略。
 
 ## 公开仓库卫生
 
