@@ -33,6 +33,63 @@ def acquire_single_instance() -> bool:
     return True
 
 
+def release_single_instance() -> None:
+    global _INSTANCE_HANDLE
+    if sys.platform == "win32" and _INSTANCE_HANDLE:
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.CloseHandle(_INSTANCE_HANDLE)
+            _INSTANCE_HANDLE = None
+        except Exception:
+            pass
+
+
+def activate_existing_window(window_title: str = "Token 账本 - 本机用量工作台") -> bool:
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, window_title)
+        if not hwnd:
+            # Enumerate visible top-level windows matching Token 账本
+            EnumWindows = user32.EnumWindows
+            EnumWindowsProc = ctypes.WINFUNCTYPE(
+                ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)
+            )
+            GetWindowTextLengthW = user32.GetWindowTextLengthW
+            GetWindowTextW = user32.GetWindowTextW
+            IsWindowVisible = user32.IsWindowVisible
+
+            found_hwnd = None
+
+            def foreach(h, l):
+                nonlocal found_hwnd
+                if IsWindowVisible(h):
+                    length = GetWindowTextLengthW(h)
+                    if length > 0:
+                        buff = ctypes.create_unicode_buffer(length + 1)
+                        GetWindowTextW(h, buff, length + 1)
+                        if "Token 账本" in buff.value:
+                            found_hwnd = h
+                            return False
+                return True
+
+            EnumWindows(EnumWindowsProc(foreach), 0)
+            hwnd = found_hwnd
+
+        if hwnd:
+            SW_RESTORE = 9
+            user32.ShowWindow(hwnd, SW_RESTORE)
+            user32.SetForegroundWindow(hwnd)
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def compact_number(value: Any) -> str:
     number = float(value or 0)
     absolute = abs(number)
@@ -121,22 +178,8 @@ def _native_message(title: str, message: str, error: bool = False) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if not acquire_single_instance():
-        _native_message(APP_NAME, "Token 账本已经在运行。")
-        return 0
-    try:
-        from .qt_native import run
-
-        return run(argv)
-    except Exception as error:
-        log_dir = default_data_dir()
-        try:
-            log_dir.mkdir(parents=True, exist_ok=True)
-            (log_dir / "native-error.log").write_text(traceback.format_exc(), encoding="utf-8")
-        except OSError:
-            pass
-        _native_message(APP_NAME, f"应用启动失败：{type(error).__name__}\n错误详情已保存到本地数据目录。", True)
-        return 1
+    from .desktop import run_desktop
+    return run_desktop()
 
 
 if __name__ == "__main__":

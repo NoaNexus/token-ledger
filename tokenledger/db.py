@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Sequence
 
-from .models import ParsedFile, ProviderProbe
+from .models import ParsedFile, ProviderProbe, QuotaSnapshot
 
 
 SCHEMA = """
@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
 );
 CREATE INDEX IF NOT EXISTS idx_usage_time ON usage_events(occurred_at);
 CREATE INDEX IF NOT EXISTS idx_usage_agent ON usage_events(agent);
+CREATE INDEX IF NOT EXISTS idx_usage_agent_time ON usage_events(agent, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_usage_model ON usage_events(model);
 
 CREATE TABLE IF NOT EXISTS quota_snapshots (
@@ -85,6 +86,7 @@ CREATE TABLE IF NOT EXISTS app_meta (
 class TokenDatabase:
     def __init__(self, path: Path):
         self.path = path
+        self._internal_version: int = 1
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.connect() as connection:
             connection.executescript(SCHEMA)
@@ -103,6 +105,14 @@ class TokenDatabase:
                 connection.execute(
                     "ALTER TABLE usage_events ADD COLUMN call_count INTEGER NOT NULL DEFAULT 1"
                 )
+
+    def data_version(self) -> int:
+        try:
+            with self.connect() as connection:
+                row = connection.execute("PRAGMA data_version").fetchone()
+                return int(row[0]) if row else 0
+        except Exception:
+            return 0
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -217,6 +227,40 @@ class TokenDatabase:
                         quota.message,
                     ),
                 )
+        self._internal_version += 1
+
+    def save_quotas(self, quotas: Sequence[QuotaSnapshot]) -> None:
+        if not quotas:
+            return
+        with self.connect() as connection:
+            for quota in quotas:
+                connection.execute(
+                    """
+                    INSERT INTO quota_snapshots(
+                      snapshot_id,agent,label,status,remaining_percent,used_percent,
+                      window_minutes,resets_at,updated_at,message
+                    ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(snapshot_id) DO UPDATE SET
+                      agent=excluded.agent,label=excluded.label,status=excluded.status,
+                      remaining_percent=excluded.remaining_percent,used_percent=excluded.used_percent,
+                      window_minutes=excluded.window_minutes,resets_at=excluded.resets_at,
+                      updated_at=excluded.updated_at,message=excluded.message
+                    WHERE excluded.updated_at >= quota_snapshots.updated_at
+                    """,
+                    (
+                        quota.snapshot_id,
+                        quota.agent,
+                        quota.label,
+                        quota.status,
+                        quota.remaining_percent,
+                        quota.used_percent,
+                        quota.window_minutes,
+                        quota.resets_at,
+                        quota.updated_at,
+                        quota.message,
+                    ),
+                )
+        self._internal_version += 1
 
     def mark_file_error(
         self,
@@ -237,12 +281,14 @@ class TokenDatabase:
                 """,
                 (file_id, agent, path_hint, mtime_ns, size_bytes, scanned_at, "error", message[:300]),
             )
+        self._internal_version += 1
 
     def remove_missing_files(self, agent: str, seen_file_ids: set[str]) -> None:
         with self.connect() as connection:
             existing = [row[0] for row in connection.execute("SELECT file_id FROM file_states WHERE agent = ?", (agent,))]
             missing = [(file_id,) for file_id in existing if file_id not in seen_file_ids]
             connection.executemany("DELETE FROM file_states WHERE file_id = ?", missing)
+        self._internal_version += 1
 
     def update_provider(self, agent: str, probe: ProviderProbe, scanned_at: str) -> None:
         with self.connect() as connection:
@@ -278,6 +324,7 @@ class TokenDatabase:
                     json.dumps(probe.metadata, ensure_ascii=False),
                 ),
             )
+        self._internal_version += 1
 
     def provider_states(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -324,6 +371,7 @@ class TokenDatabase:
                 "INSERT INTO app_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 (key, value),
             )
+        self._internal_version += 1
 
     def get_meta(self, key: str) -> str | None:
         with self.connect() as connection:

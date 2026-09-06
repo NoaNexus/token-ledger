@@ -5,17 +5,6 @@ set "PYTHONUTF8=1"
 set "PYTHONHOME="
 set "PYTHONPATH="
 
-if exist "%~dp0dist\TokenLedger\TokenLedger.exe" (
-    start "" "%~dp0dist\TokenLedger\TokenLedger.exe"
-    endlocal
-    exit /b 0
-)
-
-if exist "%~dp0dist\TokenLedger.exe" (
-    start "" "%~dp0dist\TokenLedger.exe"
-    endlocal
-    exit /b 0
-)
 
 if exist "%~dp0.venv\Scripts\python.exe" goto run_venv
 if exist "%USERPROFILE%\anaconda\python.exe" goto run_anaconda
@@ -24,22 +13,22 @@ if exist "%USERPROFILE%\miniconda3\python.exe" goto run_miniconda
 where py >nul 2>nul
 if errorlevel 1 goto use_python
 
-py -3.11 run.py --data-dir "%~dp0.data"
+py -3.11 run.py
 set "ledger_exit=%errorlevel%"
 goto after_run
 
 :run_venv
-"%~dp0.venv\Scripts\python.exe" run.py --data-dir "%~dp0.data"
+"%~dp0.venv\Scripts\python.exe" run.py
 set "ledger_exit=%errorlevel%"
 goto after_run
 
 :run_anaconda
-"%USERPROFILE%\anaconda\python.exe" run.py --data-dir "%~dp0.data"
+"%USERPROFILE%\anaconda\python.exe" run.py
 set "ledger_exit=%errorlevel%"
 goto after_run
 
 :run_miniconda
-"%USERPROFILE%\miniconda3\python.exe" run.py --data-dir "%~dp0.data"
+"%USERPROFILE%\miniconda3\python.exe" run.py
 set "ledger_exit=%errorlevel%"
 goto after_run
 
@@ -49,7 +38,7 @@ if errorlevel 1 goto no_python
 
 python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
 if errorlevel 1 goto no_python
-python run.py --data-dir "%~dp0.data"
+python run.py
 set "ledger_exit=%errorlevel%"
 goto after_run
 

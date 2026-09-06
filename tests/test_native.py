@@ -46,3 +46,18 @@ def test_native_migrates_legacy_database_with_sqlite_backup(tmp_path: Path, monk
     assert native.migrate_legacy_database(target) == source
     with sqlite3.connect(target) as connection:
         assert connection.execute("SELECT value FROM marker").fetchone()[0] == "ok"
+
+
+def test_native_single_instance_lifecycle() -> None:
+    native.release_single_instance()
+    assert native.acquire_single_instance() is True
+    # Second acquisition in same process or mutex state
+    # Calling release cleans handle
+    native.release_single_instance()
+    assert native._INSTANCE_HANDLE is None
+
+
+def test_activate_existing_window_nonexistent() -> None:
+    # Activating an imaginary window title should return False safely without error
+    assert native.activate_existing_window("NonExistentWindow_XYZ_12345") is False
+

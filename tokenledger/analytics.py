@@ -39,42 +39,59 @@ def _resolve_timezone(timezone_name: str) -> Any:
 
 
 def _metrics(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    materialized = list(rows)
-    sums = {field: sum(int(row.get(field) or 0) for row in materialized) for field in TOKEN_FIELDS}
-    input_tokens = sums["input_tokens"]
-    non_cached = max(input_tokens - sums["cached_input_tokens"], 0)
-    reported_input = sum(
-        int(row.get("input_tokens") or 0)
-        for row in materialized
-        if row.get("usage_mode") != "estimated"
-    )
-    estimated_total = sum(
-        int(row.get("total_tokens") or 0)
-        for row in materialized
-        if row.get("usage_mode") == "estimated"
-    )
-    session_rows = [row for row in materialized if row.get("usage_scope") != "account_daily"]
-    account_rows = [row for row in materialized if row.get("usage_scope") == "account_daily"]
-    account_days = {
-        row.get("local_date") or str(row.get("occurred_at") or "")[:10] for row in account_rows
-    }
+    total = input_tokens = cached_input = cache_write = output_tokens = reasoning_tokens = 0
+    reported_input = estimated_total = calls = 0
+    sessions: set[tuple[str, str]] = set()
+    account_days: set[Any] = set()
+    has_account_rows = False
+
+    for row in rows:
+        inp = int(row.get("input_tokens") or 0)
+        cinp = int(row.get("cached_input_tokens") or 0)
+        cwrite = int(row.get("cache_write_tokens") or 0)
+        out = int(row.get("output_tokens") or 0)
+        reasoning = int(row.get("reasoning_tokens") or 0)
+        tot = int(row.get("total_tokens") or 0)
+        mode = row.get("usage_mode")
+        scope = row.get("usage_scope")
+
+        total += tot
+        input_tokens += inp
+        cached_input += cinp
+        cache_write += cwrite
+        output_tokens += out
+        reasoning_tokens += reasoning
+        calls += max(int(row.get("call_count") or 0), 0)
+
+        if mode == "estimated":
+            estimated_total += tot
+        else:
+            reported_input += inp
+
+        if scope == "account_daily":
+            has_account_rows = True
+            account_days.add(row.get("local_date") or str(row.get("occurred_at") or "")[:10])
+        else:
+            sessions.add((row["agent"], row["session_id"]))
+
+    non_cached = max(input_tokens - cached_input, 0)
     return {
-        "total": sums["total_tokens"],
-        "reported_total": sums["total_tokens"] - estimated_total,
+        "total": total,
+        "reported_total": total - estimated_total,
         "estimated_total": estimated_total,
         "contains_estimates": estimated_total > 0,
         "input": input_tokens,
-        "cached_input": sums["cached_input_tokens"],
-        "cache_write": sums["cache_write_tokens"],
-        "output": sums["output_tokens"],
-        "reasoning": sums["reasoning_tokens"],
+        "cached_input": cached_input,
+        "cache_write": cache_write,
+        "output": output_tokens,
+        "reasoning": reasoning_tokens,
         "non_cached_input": non_cached,
-        "net_usage": non_cached + sums["output_tokens"],
-        "cache_hit_rate": (sums["cached_input_tokens"] / reported_input) if reported_input else None,
-        "sessions": len({(row["agent"], row["session_id"]) for row in session_rows}),
-        "session_count_complete": not account_rows,
-        "account_days": len({value for value in account_days if value}),
-        "calls": sum(max(int(row.get("call_count") or 0), 0) for row in materialized),
+        "net_usage": non_cached + output_tokens,
+        "cache_hit_rate": (cached_input / reported_input) if reported_input else None,
+        "sessions": len(sessions),
+        "session_count_complete": not has_account_rows,
+        "account_days": len({v for v in account_days if v}),
+        "calls": calls,
     }
 
 
@@ -100,22 +117,38 @@ def _rows_with_local_date(
 def _reconcile_account_rollups(
     rows: Iterable[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Prefer account-day totals over overlapping session events for the same agent and date."""
+    """Reconcile session-level events and account-day rollups intelligently.
+
+    For any (agent, date) where both session events and account rollups exist:
+    - If session total >= account rollup total, keep detailed session events (richer and higher volume);
+    - If account rollup total > session total, keep account rollup (capturing outside/desktop API activity).
+    """
     materialized = list(rows)
-    coverage = {
-        (row["agent"], row["local_date"])
-        for row in materialized
-        if row.get("usage_scope") == "account_daily"
-    }
-    kept: list[dict[str, Any]] = []
-    suppressed: list[dict[str, Any]] = []
+    grouped: dict[tuple[str, Any], list[dict[str, Any]]] = defaultdict(list)
     for row in materialized:
-        if row.get("usage_scope") != "account_daily" and (
-            row["agent"], row["local_date"]
-        ) in coverage:
-            suppressed.append(row)
-        else:
-            kept.append(row)
+        grouped[(row["agent"], row["local_date"])].append(row)
+
+    kept: list[dict[str, Any]] = []
+    suppressed_session: list[dict[str, Any]] = []
+    suppressed_account: list[dict[str, Any]] = []
+
+    for (agent, local_date), group_rows in grouped.items():
+        session_items = [r for r in group_rows if r.get("usage_scope") != "account_daily"]
+        account_items = [r for r in group_rows if r.get("usage_scope") == "account_daily"]
+
+        if session_items and account_items:
+            s_tokens = sum(int(r.get("total_tokens") or 0) for r in session_items)
+            a_tokens = sum(int(r.get("total_tokens") or 0) for r in account_items)
+            if s_tokens >= a_tokens:
+                kept.extend(session_items)
+                suppressed_account.extend(account_items)
+            else:
+                kept.extend(account_items)
+                suppressed_session.extend(session_items)
+        elif session_items:
+            kept.extend(session_items)
+        elif account_items:
+            kept.extend(account_items)
 
     diagnostics: dict[str, dict[str, Any]] = {}
     agents = {row["agent"] for row in materialized}
@@ -125,7 +158,7 @@ def _reconcile_account_rollups(
             for row in kept
             if row["agent"] == agent and row.get("usage_scope") == "account_daily"
         ]
-        removed = [row for row in suppressed if row["agent"] == agent]
+        removed = [row for row in suppressed_session if row["agent"] == agent]
         diagnostics[agent] = {
             "has_account_rollup": bool(account_rows),
             "account_days": len({row["local_date"] for row in account_rows}),
@@ -133,7 +166,7 @@ def _reconcile_account_rollups(
             "account_calls": sum(max(int(row.get("call_count") or 0), 0) for row in account_rows),
             "suppressed_session_events": len(removed),
             "suppressed_session_tokens": sum(int(row.get("total_tokens") or 0) for row in removed),
-            "policy": "同日存在 CC Switch 账户汇总时，账户汇总优先；会话日志仅补足无汇总日期",
+            "policy": "同日同时存在会话明细与账户汇总时，智能优选覆盖度更完整的数据源",
         }
     return kept, diagnostics
 
@@ -153,16 +186,57 @@ def _quota_for_agent(raw: list[dict[str, Any]], now: datetime) -> tuple[dict[str
             "updated_at": item["updated_at"],
             "message": item["message"],
         }
+        resets_at = item.get("resets_at")
+        if resets_at:
+            try:
+                reset_time = _parse_timestamp(resets_at)
+                if now >= reset_time:
+                    output["status"] = "fresh"
+                    output["remaining_percent"] = 100.0
+                    output["used_percent"] = 0.0
+                    output["message"] = "额度重置周期已届满，已自动重置为 100%"
+            except (TypeError, ValueError):
+                pass
         try:
             age = now - _parse_timestamp(item["updated_at"])
-            if age > timedelta(hours=24):
+            if age > timedelta(hours=24) and output["status"] != "fresh":
                 output["status"] = "stale"
                 output["message"] = "超过 24 小时未获得新的服务端额度窗口"
         except (TypeError, ValueError):
             output["status"] = "stale"
         windows.append(output)
-    windows.sort(key=lambda item: (0 if item["window_minutes"] == 300 else 1, item["window_minutes"] or 999999))
+
+    def _quota_sort_key(item: dict[str, Any]) -> tuple[int, int, int]:
+        label = item.get("label", "")
+        family = 0 if "Gemini" in label else (1 if "Claude" in label or "GPT" in label else 2)
+        win = 0 if item.get("window_minutes") == 10080 else (1 if item.get("window_minutes") == 300 else 2)
+        return (family, win, item.get("window_minutes") or 999999)
+
+    windows.sort(key=_quota_sort_key)
     return windows[0], windows
+
+
+class _DashboardSnapshotCache:
+    def __init__(self) -> None:
+        self.key: Any = None
+        self.local_today: date | None = None
+        self.lifetime_rows: list[dict[str, Any]] = []
+        self.lifetime_reconciliation: dict[str, dict[str, Any]] = {}
+        self.lifetime_summary: dict[str, Any] = {}
+        self.lifetime_agents: dict[str, dict[str, Any]] = {}
+        self.payload_cache: dict[tuple[int | None, str | None], dict[str, Any]] = {}
+
+    def clear(self) -> None:
+        self.key = None
+        self.local_today = None
+        self.lifetime_rows = []
+        self.lifetime_reconciliation = {}
+        self.lifetime_summary = {}
+        self.lifetime_agents = {}
+        self.payload_cache.clear()
+
+
+_CACHE = _DashboardSnapshotCache()
 
 
 def build_dashboard(
@@ -175,29 +249,79 @@ def build_dashboard(
     tz = _resolve_timezone(timezone_name)
     now = datetime.now(timezone.utc)
     local_today = now.astimezone(tz).date()
-    raw_lifetime_rows = database.usage_rows(agent=selected_agent)
-    dated_lifetime_rows = _rows_with_local_date(raw_lifetime_rows, tz, end_date=local_today)
-    lifetime_rows, lifetime_reconciliation = _reconcile_account_rollups(dated_lifetime_rows)
+
+    db_path = str(getattr(database, "path", ""))
+    internal_version = getattr(database, "_internal_version", 0)
+    data_ver_fn = getattr(database, "data_version", None)
+    db_data_version = data_ver_fn() if callable(data_ver_fn) else 0
+    cache_key = (db_path, internal_version, db_data_version, timezone_name)
+
+    if _CACHE.key != cache_key or _CACHE.local_today != local_today:
+        _CACHE.clear()
+        raw_rows = database.usage_rows()
+        dated_rows = _rows_with_local_date(raw_rows, tz, end_date=local_today)
+        lifetime_rows, lifetime_reconciliation = _reconcile_account_rollups(dated_rows)
+
+        _CACHE.key = cache_key
+        _CACHE.local_today = local_today
+        _CACHE.lifetime_rows = lifetime_rows
+        _CACHE.lifetime_reconciliation = lifetime_reconciliation
+        _CACHE.lifetime_summary = _metrics(lifetime_rows)
+        _CACHE.lifetime_agents = {
+            provider.id: _metrics(row for row in lifetime_rows if row["agent"] == provider.id)
+            for provider in REGISTRY
+        }
+
+    req_key = (days, selected_agent)
+    if req_key in _CACHE.payload_cache:
+        cached = _CACHE.payload_cache[req_key]
+        return {
+            **cached,
+            "meta": {
+                **cached["meta"],
+                "generated_at": now.isoformat().replace("+00:00", "Z"),
+                "scan": scan_status,
+            },
+        }
+
+    all_lifetime = _CACHE.lifetime_rows
+    if selected_agent:
+        scoped_lifetime = [row for row in all_lifetime if row["agent"] == selected_agent]
+        lifetime_summary = _metrics(scoped_lifetime)
+        lifetime_reconciliation = {
+            selected_agent: _CACHE.lifetime_reconciliation.get(selected_agent, {})
+        }
+    else:
+        scoped_lifetime = all_lifetime
+        lifetime_summary = _CACHE.lifetime_summary
+        lifetime_reconciliation = _CACHE.lifetime_reconciliation
+
     if days is None:
-        if lifetime_rows:
-            start_date = min(row["local_date"] for row in lifetime_rows)
+        if scoped_lifetime:
+            start_date = min(row["local_date"] for row in scoped_lifetime)
         else:
             start_date = local_today - timedelta(days=29)
-        rows_with_date = lifetime_rows
-        range_reconciliation = lifetime_reconciliation
+        rows_with_date = scoped_lifetime
         range_days = max((local_today - start_date).days + 1, 1)
     else:
         range_days = max(days, 1)
         start_date = local_today - timedelta(days=range_days - 1)
-        start_local = datetime.combine(start_date, time.min, tzinfo=tz)
-        start_utc = start_local.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
-        raw_rows = database.usage_rows(start_at=start_utc, agent=selected_agent)
-        dated_rows = _rows_with_local_date(raw_rows, tz, start_date, local_today)
-        rows_with_date, range_reconciliation = _reconcile_account_rollups(dated_rows)
+        rows_with_date = [row for row in scoped_lifetime if row["local_date"] >= start_date]
+
+    range_reconciliation = {
+        agent: reco
+        for agent, reco in _CACHE.lifetime_reconciliation.items()
+        if not selected_agent or agent == selected_agent
+    }
 
     daily_buckets: dict[date, list[dict[str, Any]]] = defaultdict(list)
+    agent_buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    model_buckets: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
     for row in rows_with_date:
         daily_buckets[row["local_date"]].append(row)
+        agent_buckets[row["agent"]].append(row)
+        model_buckets[(row["agent"], row["route"], row["platform"], row["model"])].append(row)
+
     daily: list[dict[str, Any]] = []
     cursor = start_date
     while cursor <= local_today:
@@ -218,7 +342,7 @@ def build_dashboard(
     states = {row["agent"]: row for row in database.provider_states()}
     agents: list[dict[str, Any]] = []
     for provider in REGISTRY:
-        bucket = [row for row in rows_with_date if row["agent"] == provider.id]
+        bucket = agent_buckets.get(provider.id, [])
         metric = _metrics(bucket)
         state = states.get(provider.id, {})
         provider_metadata = state.get("metadata", {})
@@ -257,9 +381,6 @@ def build_dashboard(
             }
         )
 
-    model_buckets: dict[tuple[str, str, str, str], list[dict[str, Any]]] = defaultdict(list)
-    for row in rows_with_date:
-        model_buckets[(row["agent"], row["route"], row["platform"], row["model"])].append(row)
     total_all = sum(row["total_tokens"] for row in rows_with_date)
     models = []
     for (agent, route, platform, model), bucket in model_buckets.items():
@@ -296,7 +417,8 @@ def build_dashboard(
         for provider in REGISTRY
     ]
 
-    return {
+
+    payload = {
         "meta": {
             "generated_at": now.isoformat().replace("+00:00", "Z"),
             "range": {"start": start_date.isoformat(), "end": local_today.isoformat(), "days": range_days},
@@ -307,15 +429,14 @@ def build_dashboard(
         },
         "summary": _metrics(rows_with_date),
         "lifetime": {
-            "summary": _metrics(lifetime_rows),
+            "summary": lifetime_summary,
             "reconciliation": lifetime_reconciliation,
-            "agents": {
-                provider.id: _metrics(row for row in lifetime_rows if row["agent"] == provider.id)
-                for provider in REGISTRY
-            },
+            "agents": _CACHE.lifetime_agents,
         },
         "daily": daily,
         "agents": agents,
         "models": models[:30],
         "sources": sources,
     }
+    _CACHE.payload_cache[req_key] = payload
+    return payload

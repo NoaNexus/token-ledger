@@ -1,19 +1,13 @@
 Option Explicit
 
-Dim shell, files, base, executable, legacyExecutable, fallback
+Dim shell, files, base, scriptFile
 Set shell = CreateObject("WScript.Shell")
 Set files = CreateObject("Scripting.FileSystemObject")
 base = files.GetParentFolderName(WScript.ScriptFullName)
-executable = base & "\dist\TokenLedger\TokenLedger.exe"
-legacyExecutable = base & "\dist\TokenLedger.exe"
-fallback = base & "\native_app.pyw"
+scriptFile = base & "\native_app.pyw"
 
-If files.FileExists(executable) Then
-    shell.Run Chr(34) & executable & Chr(34), 1, False
-ElseIf files.FileExists(legacyExecutable) Then
-    shell.Run Chr(34) & legacyExecutable & Chr(34), 1, False
-ElseIf files.FileExists(fallback) Then
-    shell.Run Chr(34) & fallback & Chr(34), 1, False
+If files.FileExists(scriptFile) Then
+    shell.Run "pythonw.exe """ & scriptFile & """", 0, False
 Else
-    MsgBox "TokenLedger.exe was not found.", 16, "Token Ledger"
+    shell.Run "python.exe """ & base & "\run.py""", 0, False
 End If

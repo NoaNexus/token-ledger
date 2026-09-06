@@ -58,32 +58,77 @@ def safe_usage_rollups(user_home: Path) -> list[dict[str, Any]]:
     try:
         uri = database_path.resolve().as_uri() + "?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=2)
-        rollup_columns = {
-            row[1] for row in connection.execute("PRAGMA table_info(usage_daily_rollups)")
-        }
-        provider_columns = {row[1] for row in connection.execute("PRAGMA table_info(providers)")}
-        if not ROLLUP_COLUMNS.issubset(rollup_columns) or not {"id", "name"}.issubset(
-            provider_columns
-        ):
+        tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not {"providers"}.issubset(tables):
             return []
-        rows = connection.execute(
-            """
-            SELECT r.date, r.provider_id, COALESCE(p.name, 'CC Switch 历史平台') AS provider_name,
-                   COALESCE(NULLIF(r.model, ''), '模型未记录') AS model,
-                   r.input_token_semantics,
-                   SUM(r.request_count) AS request_count,
-                   SUM(r.input_tokens) AS input_tokens,
-                   SUM(r.output_tokens) AS output_tokens,
-                   SUM(r.cache_read_tokens) AS cache_read_tokens,
-                   SUM(r.cache_creation_tokens) AS cache_creation_tokens
-            FROM usage_daily_rollups AS r
-            LEFT JOIN providers AS p ON p.id = r.provider_id
-            WHERE lower(r.app_type) LIKE 'claude%'
-              AND r.input_token_semantics = 2
-            GROUP BY r.date, r.provider_id, provider_name, model, r.input_token_semantics
-            ORDER BY r.date, provider_name, model
-            """
-        ).fetchall()
+        provider_columns = {row[1] for row in connection.execute("PRAGMA table_info(providers)")}
+        if not {"id", "name"}.issubset(provider_columns):
+            return []
+
+        rows: list[Any] = []
+        has_rollups = "usage_daily_rollups" in tables
+        has_proxy_logs = "proxy_request_logs" in tables
+
+        if has_rollups:
+            rollup_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(usage_daily_rollups)")
+            }
+            if ROLLUP_COLUMNS.issubset(rollup_columns):
+                rows.extend(connection.execute(
+                    """
+                    SELECT r.date, r.provider_id, COALESCE(p.name, 'CC Switch 历史平台') AS provider_name,
+                           COALESCE(NULLIF(r.model, ''), '模型未记录') AS model,
+                           r.input_token_semantics,
+                           SUM(r.request_count) AS request_count,
+                           SUM(r.input_tokens) AS input_tokens,
+                           SUM(r.output_tokens) AS output_tokens,
+                           SUM(r.cache_read_tokens) AS cache_read_tokens,
+                           SUM(r.cache_creation_tokens) AS cache_creation_tokens
+                    FROM usage_daily_rollups AS r
+                    LEFT JOIN providers AS p ON p.id = r.provider_id
+                    WHERE lower(r.app_type) LIKE 'claude%'
+                      AND r.input_token_semantics = 2
+                    GROUP BY r.date, r.provider_id, provider_name, model, r.input_token_semantics
+                    ORDER BY r.date, provider_name, model
+                    """
+                ).fetchall())
+
+        if has_proxy_logs:
+            proxy_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(proxy_request_logs)")
+            }
+            required_proxy = {
+                "created_at", "provider_id", "app_type", "model",
+                "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"
+            }
+            if required_proxy.issubset(proxy_columns):
+                exclude_dates_clause = ""
+                if has_rollups:
+                    exclude_dates_clause = """
+                        AND date(r.created_at, 'unixepoch', 'localtime') NOT IN (
+                            SELECT DISTINCT date FROM usage_daily_rollups WHERE lower(app_type) LIKE 'claude%'
+                        )
+                    """
+                proxy_sql = f"""
+                    SELECT date(r.created_at, 'unixepoch', 'localtime') AS date,
+                           r.provider_id,
+                           COALESCE(p.name, 'CC Switch 历史平台') AS provider_name,
+                           COALESCE(NULLIF(r.model, ''), '模型未记录') AS model,
+                           2 AS input_token_semantics,
+                           COUNT(*) AS request_count,
+                           SUM(r.input_tokens) AS input_tokens,
+                           SUM(r.output_tokens) AS output_tokens,
+                           SUM(r.cache_read_tokens) AS cache_read_tokens,
+                           SUM(r.cache_creation_tokens) AS cache_creation_tokens
+                    FROM proxy_request_logs AS r
+                    LEFT JOIN providers AS p ON p.id = r.provider_id
+                    WHERE lower(r.app_type) LIKE 'claude%'
+                      {exclude_dates_clause}
+                    GROUP BY date, r.provider_id, provider_name, model
+                    ORDER BY date, provider_name, model
+                """
+                rows.extend(connection.execute(proxy_sql).fetchall())
+
         return [
             {
                 "date": str(row[0]),

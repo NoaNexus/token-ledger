@@ -29,23 +29,34 @@ def _reasoning_tokens(details: Any) -> int:
 
 class ClaudeAdapter(ProviderAdapter):
     descriptor = descriptor("claude")
-    parser_revision = "cc-switch-account-rollups-v1"
+    parser_revision = "cc-switch-proxy-plus-3p-v2"
 
     @property
     def claude_home(self) -> Path:
         return self.user_home / ".claude"
 
+    @property
+    def claude_3p_home(self) -> Path:
+        return self.user_home / "AppData" / "Local" / "Claude-3p"
+
     def discover_files(self) -> list[DiscoveredFile]:
+        files: list[DiscoveredFile] = []
         root = self.claude_home / "projects"
-        files = (
-            [
+        if root.exists():
+            files.extend(
                 DiscoveredFile(path, "~/.claude/projects/**/*.jsonl")
                 for path in sorted(root.rglob("*.jsonl"), key=str)
                 if path.is_file()
-            ]
-            if root.exists()
-            else []
-        )
+            )
+        root_3p = self.claude_3p_home / "local-agent-mode-sessions"
+        if root_3p.exists():
+            files.extend(
+                DiscoveredFile(path, "%LOCALAPPDATA%/Claude-3p/**/.claude/projects/**/*.jsonl")
+                for path in sorted(root_3p.rglob("*.jsonl"), key=str)
+                if path.is_file()
+                and "audit" not in path.name.lower()
+                and "telemetry" not in str(path).lower()
+            )
         switch = detect_cc_switch(self.user_home)
         # Keep the database in the discovery set even if a read is temporarily blocked;
         # the scanner will retain the last valid events and mark only this source as errored.
@@ -53,7 +64,7 @@ class ClaudeAdapter(ProviderAdapter):
             files.append(
                 DiscoveredFile(
                     switch.database_path,
-                    "~/.cc-switch/cc-switch.db::usage_daily_rollups（Claude 账户日汇总）",
+                    "~/.cc-switch/cc-switch.db::usage_daily_rollups + proxy_request_logs（Claude 账户日汇总）",
                 )
             )
         return files
@@ -98,13 +109,19 @@ class ClaudeAdapter(ProviderAdapter):
             },
         )
 
+    def _get_switch_meta(self) -> tuple[str, dict[str, str], str]:
+        if not hasattr(self, "_cached_switch_meta"):
+            switch = detect_cc_switch(self.user_home)
+            route = "CC Switch" if switch.installed else "直接连接"
+            platforms = unique_model_platforms(self.user_home) if switch.installed else {}
+            self._cached_switch_meta = (route, platforms, switch.platform)
+        return self._cached_switch_meta
+
     def parse_file(self, discovered: DiscoveredFile) -> ParsedFile:
         path = discovered.path
         if path.name.lower() == "cc-switch.db":
             return self._parse_cc_switch_rollups(path)
-        switch = detect_cc_switch(self.user_home)
-        route = "CC Switch" if switch.installed else "直接连接"
-        model_platforms = unique_model_platforms(self.user_home) if switch.installed else {}
+        route, model_platforms, fallback_platform = self._get_switch_meta()
         seen: set[str] = set()
         result = ParsedFile(session_count=1)
         with path.open("r", encoding="utf-8", errors="replace") as handle:
@@ -133,7 +150,7 @@ class ClaudeAdapter(ProviderAdapter):
                 output = as_nonnegative_int(usage.get("output_tokens"))
                 reasoning = _reasoning_tokens(usage.get("output_tokens_details"))
                 model = str(message.get("model") or "未识别模型")
-                platform = model_platforms.get(model, "平台未识别（历史）") if switch.installed else switch.platform
+                platform = model_platforms.get(model, fallback_platform)
                 session_id = str(obj.get("sessionId") or path.stem)
                 result.events.append(
                     UsageEvent(

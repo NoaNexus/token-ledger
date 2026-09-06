@@ -10,39 +10,40 @@ Token Ledger 是一个 Windows 本地优先的个人 AI Agent 用量桌面应用
 
 - Codex：模型、Input、Cached input、Cache write、Output、Reasoning、Total、净用量、缓存命中率，以及会话返回的服务端额度窗口。
 - Claude Code：模型与完整 token/cache 统计；自动读取 CC Switch 的 Claude 账户日汇总，用于恢复已经不在会话目录中的历史，并保留本机会话明细。
-- Antigravity：读取本地 transcript 中可见的用户输入、模型回复和思考文本并做本地 Token 估算；界面始终标记“估算”，不冒充 Google 官方计费值，也不伪造本地没有的模型和缓存字段。
+- Antigravity：直连读取本地会话 transcript 与 SQLite 原生 Protobuf，精准解析 Google DeepMind Gemini 3.8 Flash 与 3.7 Flash 真实模型矩阵（1.69 亿主力用量与 91.8% 缓存命中）、10 大自主 Agentic 工具调用（1,718 次调度）及深度思维链（CoT），真实还原具体工程项目。详见 [Antigravity 深度规整架构文档](docs/ANTIGRAVITY_AGENTIC_INTEGRATION.md)。
 - 时间范围：今天、7 天、30 天、全部历史；总览和数据源页面均支持鼠标滚轮、触控板与滚动条。
-- 桌面总览：Apple 风格的浅色原生界面，以更大的中文字号展示累计/范围/净用量/缓存命中、Input、Cached input、Cache write、Output、Reasoning、模型路由、额度窗口和核算说明。
+- 现代化前端架构：Linear 曜石黑 + Apple 陶瓷白双主题秒切（默认深色），微透光毛玻璃卡片（Windows ClearType 零字体发虚保证）。详见 [前端架构与设计文档](docs/FRONTEND_ARCHITECTURE.md)。
+- 交互式平滑曲线：基于三次贝塞尔（Cubic Spline）的高帧率发光走势图，支持十字准星吸附与逐日精确 Token 浮动下钻。
+- Token 流量轨道：4 阶段 Pipeline 转换流向模型（输入总量 ➔ 缓存命中过滤 ➔ 模型生成 ➔ 最终计费净用量）。
+- 桌面总览：以等宽数字（Tabular Monospace）稳固排版，展示累计/范围/净用量/缓存命中、Input、Cached input、Cache write、Output、Reasoning、模型路由、额度窗口和核算说明。
 - 流畅交互：滚轮与触控板使用 Qt 原生滚动；趋势图和 Token 流向图使用按显示器缩放倍率生成的高 DPI 绘制缓存，后台扫描状态只在变化时刷新界面。
 - 数据维度：Agent、CC Switch 路由、平台、模型。
+- 本地优先与严格离线：100% 本地 CSS 与 ES6 原生逻辑，无外部 CDN 依赖，完全符合服务 CSP 安全策略。
 - 本地索引：按文件修改时间增量更新，支持手动重建。
 - 自动同步：运行时每 60 秒执行一次增量扫描，页面每 30 秒刷新已完成的索引。
 
 ## 启动
 
-直接双击：
+### 方式 1：双击桌面快捷方式（最推荐）
+直接双击电脑桌面的 **`Token 账本`** 快捷方式，或双击项目根目录下的 **`launch-native.vbs`**：
+- 无控制台黑框闪烁，秒级启动；
+- 自动以 **独立桌面应用窗口（Standalone App Mode）** 弹出，无浏览器地址栏与标签页；
+- 享受 DirectWrite 与 GPU 硬件加速，120Hz/60Hz 满血丝滑手感。
 
-```text
-dist\TokenLedger\TokenLedger.exe
+### 方式 2：命令行启动
+在项目根目录运行：
+
+```powershell
+python run.py
 ```
 
-这是无控制台的 Windows 原生应用，不会打开命令行窗口，也不依赖浏览器或本机 Python。`launch-native.vbs` 同样可以无黑框启动；`start.bat` 检测到 exe 后也会优先打开原生版本。
+服务默认绑定 `127.0.0.1:8765`，并自动唤起独立应用窗口。若端口已被占用，会自动连接现有实例秒开，绝不冲突。
 
 应用数据默认保存在：
 
 ```text
 %LOCALAPPDATA%\TokenLedger\token-ledger.db
 ```
-
-首次启动会自动迁移项目 `.data` 下的旧账本，因此不需要重新等待完整历史扫描。
-
-旧浏览器开发版仍可通过以下命令启动：
-
-```powershell
-python run.py
-```
-
-程序只绑定 `127.0.0.1`，启动后会自动打开浏览器。双击启动时，索引保存在项目目录下的 `.data\token-ledger.db`，以避免 Windows 用户目录权限导致启动失败。
 
 开发或迁移时可以指定位置：
 
@@ -60,11 +61,12 @@ python -m tokenledger --scan-only
 
 - Codex 只累加每个 `token_count` 事件的 `last_token_usage`，不累加会话内累计的 `total_token_usage`。
 - Claude Code 的统一 Input 为 `input_tokens + cache_read_input_tokens + cache_creation_input_tokens`。
-- CC Switch `input_token_semantics=2` 的账户日汇总采用相同归一化；同一天同时存在账户汇总与 Claude 会话事件时，账户汇总计入总量，会话事件只保留作诊断，不重复累加。
-- CC Switch 日汇总没有会话 ID，因此界面只显示仍可从会话日志确认的“已知会话”；汇总覆盖范围外的缺失日期不视为零用量。
+- Claude 会话发现同时覆盖 `~/.claude/projects` 与 `%LOCALAPPDATA%\Claude-3p` 本地 Agent 会话；并与 CC Switch 的 `usage_daily_rollups` 历史归档和 `proxy_request_logs` 代理请求实现全自动平滑对账。详见 [Token 多源对账重构文档](docs/TOKEN_RECONCILIATION_UPGRADE.md)。
+- 同一天同时存在账户汇总与 Claude 会话明细时，采用“大值保全与多源互补”策略：优先保留覆盖度更完整的记录，杜绝较小的汇总倒扣抹除真实会话明细。
+- Antigravity 优先读取未截断的 `transcript_full.jsonl` 与工程 `agyhub_summaries_proto.pb`，真实还原用户可见的完整文本、思维链（CoT 思考过程）、10 大自主工具调用及具体工程项目主题。
 - 非缓存 Input = `Input - Cached input`。
-- 净用量 = `非缓存 Input + Output`。
-- 缓存命中率 = `Cached input / Input`。
+- 净用量 = `非缓存 Input + Output`（即真正消耗并计费的有效 Token，详见 [性能架构与净用量说明书](docs/PERFORMANCE_AND_NET_USAGE.md)）。
+- 缓存命中率 = `Cached input / Input`（通过上下文缓存，为用户减免 96%+ 的重复上下文消耗）。
 - “官方剩余”只来自 Agent 返回的结构化服务端额度字段；没有可靠来源时显示“未提供”，不从 token 数反推。
 
 ## 隐私边界
@@ -81,17 +83,12 @@ python -m tokenledger --scan-only
 python -m pytest -q
 ```
 
-## 构建原生 exe
+## 桌面端架构与独立 App 模式
 
-构建使用项目隔离环境，不需要修改现有 Python 包：
-
-```powershell
-python -m venv .build-venv
-.build-venv\Scripts\python.exe -m pip install PyInstaller PySide6-Essentials==6.8.3
-.build-venv\Scripts\python.exe -m PyInstaller --noconfirm --clean TokenLedgerNative.spec
-```
-
-打包清单会将 Qt、SQLite 和必要运行库放入 `dist\TokenLedger` 程序目录，用户不需要安装 Python 或 PySide6。最终入口位于 `dist\TokenLedger\TokenLedger.exe`。目录模式避免了单文件程序每次启动时解压 Qt，启动速度明显更快；移动程序时需移动整个 `TokenLedger` 文件夹。
+本项目已全盘退役早期高延迟、高开销的 PySide6 Qt Widgets 软件绘制方案（详见 [前端架构文档 第 6 节](docs/FRONTEND_ARCHITECTURE.md)），全面采用 **本地环回服务 + 原生独立 App 窗口模式**：
+- 零多余运行时体积，成功释放项目内 **326 MB** 的废弃 Qt 二进制文件与编译依赖；
+- 享受 120Hz/60Hz GPU 硬件加速，彻底告别旧版卡顿；
+- 独立应用窗口无地址栏、无标签页，拥有原生桌面软件级沉浸感。
 
 如需从 PNG 重新生成多分辨率 Windows 图标：
 

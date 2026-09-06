@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .db import TokenDatabase
+from .models import QuotaSnapshot
 from .providers.base import ProviderAdapter
 from .providers.common import stable_id
 
@@ -130,7 +131,27 @@ class ScanCoordinator:
                     message=f"正在索引 {adapter.descriptor.name} · {processed}/{total_files}",
                 )
             self.database.remove_missing_files(agent, seen_ids)
-            self.database.update_provider(agent, adapter.probe(), utc_now())
+            probe = adapter.probe()
+            self.database.update_provider(agent, probe, utc_now())
+            if isinstance(probe.metadata, dict) and probe.metadata.get("budget_windows"):
+                snapshots = [
+                    QuotaSnapshot(
+                        snapshot_id=w.get("snapshot_id") or f"{agent}:{w.get('label')}",
+                        agent=agent,
+                        label=w.get("label", ""),
+                        status=w.get("status", "fresh"),
+                        remaining_percent=w.get("remaining_percent"),
+                        used_percent=w.get("used_percent"),
+                        window_minutes=w.get("window_minutes"),
+                        resets_at=w.get("resets_at"),
+                        updated_at=w.get("updated_at") or utc_now(),
+                        message=w.get("message", ""),
+                    )
+                    for w in probe.metadata["budget_windows"]
+                    if w.get("remaining_percent") is not None
+                ]
+                if snapshots:
+                    self.database.save_quotas(snapshots)
             if not adapter_errors:
                 self.database.set_meta(revision_key, parser_revision)
 
