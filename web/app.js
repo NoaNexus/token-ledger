@@ -630,6 +630,11 @@ function renderOverview(data) {
               <strong style="color:var(--text-primary)">${data.summary.cost_cny_text || '¥0.00'}</strong>
               <span style="opacity:0.8;font-weight:normal">(${data.summary.cost_usd_text || '$0.00'})</span>
             </div>
+            ${data.summary.claude_benchmark ? `
+            <div class="claude-benchmark-badge" style="margin-top:6px;padding:4px 8px;background:rgba(249,115,22,0.08);border:1px dashed rgba(249,115,22,0.3);border-radius:8px;font-size:11px;color:var(--text-secondary);line-height:1.4" title="通过 CC Switch 中转调用智谱 GLM-Flash、DeepSeek-Flash 等极速模型，单价仅 0.1元/百万且享受 95%+ 缓存减负">
+              💡 经 CC Switch 走极速模型实付仅 <strong>${data.summary.cost_cny_text}</strong>；若运行于 <strong>Claude 3.5 Sonnet</strong> 官方原生约合 <strong>${data.summary.claude_benchmark.benchmark_cny_text}</strong> (${data.summary.claude_benchmark.benchmark_usd_text})，降本 <strong>${data.summary.claude_benchmark.saved_percent}%</strong>
+            </div>
+            ` : ''}
           </div>
           <div class="kpi-foot">
             <span style="color:#34D399;font-weight:500">已省缓存：${compactNumber(summary.cached_input)}</span>
@@ -1099,7 +1104,7 @@ function rankingPanel(models, agents) {
         <div class="model-stat" style="text-align:right">
           <div class="model-stat-val mono">${compactNumber(model.total)}</div>
           <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:2px">
-            <span class="model-cost-tag" title="基于官方当前公有云标准定价预估: ${escapeHtml(model.pricing_source || '公有云定价')}">
+            <span class="model-cost-tag" title="基于官方当前公有云标准定价预估: ${escapeHtml(model.pricing_source || '公有云定价')}${model.unit_rate_text ? '&#10;计费标准: ' + escapeHtml(model.unit_rate_text) : ''}">
               <span>${model.cost_cny_text || '¥0.00'}</span>
               <span class="model-cost-usd">(${model.cost_usd_text || '$0.00'})</span>
             </span>
@@ -1127,6 +1132,12 @@ function rankingPanel(models, agents) {
           ${items || '<div style="padding:16px;text-align:center;color:var(--text-tertiary)">当前范围没有模型记录</div>'}
         </div>
       </div>
+
+      ${state.agent === "claude" ? `
+      <div style="margin:12px 0 6px;padding:8px 12px;background:rgba(249,115,22,0.06);border:1px dashed rgba(249,115,22,0.25);border-radius:10px;font-size:11.5px;color:var(--text-secondary);line-height:1.45">
+        💡 <strong>Claude Code 计费说明</strong>：当前主要用量由 CC Switch 路由至国产极速模型（如智谱 GLM-5.3-Flash 官方单价仅 ¥0.10/M），加上 95%+ 上下文缓存减免，故公有云支出仅个位数人民币。
+      </div>
+      ` : ''}
 
       <div class="ranking-foot">
         <span>数据源可信度</span>
@@ -2582,6 +2593,8 @@ function setupTiltCards() {
 
     card.addEventListener("mouseenter", () => {
       rect = card.getBoundingClientRect();
+      // Ensure zero residual transform to guarantee razor-sharp ClearType text rendering
+      card.style.removeProperty("transform");
     });
 
     card.addEventListener("mousemove", (e) => {
@@ -2595,12 +2608,8 @@ function setupTiltCards() {
         if (!rect) return;
         const x = clientX - rect.left;
         const y = clientY - rect.top;
-        const cx = rect.width / 2;
-        const cy = rect.height / 2;
-        const rotX = ((y - cy) / cy) * -4.2;
-        const rotY = ((x - cx) / cx) * 4.2;
 
-        card.style.transform = `perspective(1000px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+        // 仅动态投射镜面高光光泽（光标跟随），绝不触碰 DOM transform，彻底杜绝任何字体发虚发糊
         card.style.setProperty("--glare-x", `${((x / rect.width) * 100).toFixed(1)}%`);
         card.style.setProperty("--glare-y", `${((y / rect.height) * 100).toFixed(1)}%`);
       });
@@ -2612,7 +2621,7 @@ function setupTiltCards() {
         rafId = null;
       }
       rect = null;
-      card.style.transform = "perspective(1000px) rotateX(0deg) rotateY(0deg)";
+      card.style.removeProperty("transform");
     });
   });
 }

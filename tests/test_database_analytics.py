@@ -258,4 +258,37 @@ def test_estimate_token_cost_and_dashboard_pricing(tmp_path: Path) -> None:
     assert len(dash["models"]) == 1
     assert dash["models"][0]["cost_cny_text"] is not None
     assert dash["models"][0]["cost_usd_text"] is not None
+    assert "unit_rate_text" in dash["models"][0]
+
+    # Test Claude benchmark comparison
+    parsed_claude = ParsedFile(
+        events=[
+            UsageEvent(
+                event_id="pricing-claude-1",
+                agent="claude",
+                route="CC Switch",
+                platform="Zhipu GLM",
+                model="glm-5.3-flash",
+                session_id="s2",
+                occurred_at="2026-09-02T02:00:00Z",
+                input_tokens=10_000_000,
+                cached_input_tokens=9_000_000,
+                output_tokens=100_000,
+                total_tokens=10_100_000,
+            )
+        ]
+    )
+    database.replace_file("f2", "claude", "fixture2", 1, 1, parsed_claude, "2026-09-02T02:00:00Z")
+    dash_claude = build_dashboard(
+        database=database,
+        scan_status={"status": "ready", "progress": 100, "message": "OK"},
+        timezone_name="Asia/Shanghai",
+        days=30,
+        selected_agent="claude",
+    )
+    claude_agent = next(a for a in dash_claude["agents"] if a["id"] == "claude")
+    assert claude_agent.get("claude_benchmark") is not None
+    assert "Claude 3.5 Sonnet" in claude_agent["claude_benchmark"]["benchmark_name"]
+    assert claude_agent["claude_benchmark"]["saved_percent"] > 0
+    assert dash_claude["summary"].get("claude_benchmark") is not None
 

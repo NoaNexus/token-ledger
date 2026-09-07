@@ -109,8 +109,10 @@ TokenCount/
 - **页面边距与锚点避让**：`.workspace` 保持 `padding: 86px 0 48px;`，所有锚点与面板均带有 `scroll-margin-top: 80px;`，保证页面向下滚动或锚点跳转时，内容永不被 60px 顶栏遮挡。
 
 ### 4.3 模型价值与公有云折算引擎 (`tokenledger/analytics.py` & `web/app.js`)
-- `tokenledger/analytics.py` 中内置 `MODEL_PRICING` 字典，配置主流模型的公有云百万 Token 输入/输出价格（如 GPT-4o, Claude 3.5, DeepSeek 等）。
-- `assemble_dashboard_payload` 会自动核算总输入、输出及缓存节约折算为 CNY 与 USD 商业价值，并在总览 KPI 及各模型卡片中精准呈现。
+- `tokenledger/analytics.py` 中内置 `PRICING_CATALOG` 字典，按 key 长度降序排序匹配，杜绝 `gpt-4o-mini` 与 `gpt-4o` 间的前缀遮蔽。配置主流模型（OpenAI/Codex Frontier, Claude, DeepSeek, Gemini, GLM, Qwen 等）公有云百万 Token 输入/输出/缓存定价。
+- **Claude Code 中转与对标双轨核算**：当 Claude Code 经由 `CC Switch` 路由至国产极速大模型（如智谱 GLM-Flash、DeepSeek-Flash，单价仅 0.1元/M）且享受 95%+ 上下文缓存减免时，系统不仅如实核算其实付中转价值，还会自动附带计算 **Anthropic 官方 Claude 3.5 Sonnet 原生对标价值**与节约比例，消除用户对"用量大但费用低"的疑虑。
+- **卡片渲染与悬停防虚防糊规范**：卡片使用纯 CSS 平面微升（`box-shadow`）与光标跟随镜面高光反射（`specular-glare`），严禁对含文字卡片施加 3D `rotateX/Y` 或 `transform-style: preserve-3d`，确保 DirectWrite ClearType 字体渲染 100% 锐利。
+- **Windows DWM 原生边框动态双向跟随**：PyQt5 监听前端 `titleChanged` 信号实时同步系统 DWM 标题栏沉浸色（暗色 `#090C10`，亮色 `#F8FAFC`），杜绝黑白模式下的窗口边框反差。
 
 ---
 

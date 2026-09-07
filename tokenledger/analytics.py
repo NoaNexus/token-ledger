@@ -434,6 +434,9 @@ def estimate_token_cost(
     cost_cny_text = f"¥{cost_cny:,.2f}" if cost_cny >= 0.01 else f"¥{cost_cny:,.4f}"
     cost_usd_text = f"${cost_usd:,.2f}" if cost_usd >= 0.01 else f"${cost_usd:,.4f}"
 
+    sym = "$" if currency == "USD" else "¥"
+    unit_rate_text = f"输入 {sym}{inp_rate}/M · 缓存 {sym}{cache_rate}/M · 输出 {sym}{out_rate}/M"
+
     return {
         "cost_cny": round(cost_cny, 4),
         "cost_usd": round(cost_usd, 4),
@@ -441,6 +444,7 @@ def estimate_token_cost(
         "cost_usd_text": cost_usd_text,
         "pricing_source": rule["source"],
         "pricing_model_matched": target_key,
+        "unit_rate_text": unit_rate_text,
     }
 
 
@@ -614,6 +618,27 @@ def build_dashboard(
                 "updated_at": state.get("last_scan"),
                 "message": provider_metadata.get("quota_note") or "本地日志可统计 Token，但没有可靠的服务端额度来源",
             }
+        claude_benchmark = None
+        if provider.id == "claude" and bucket:
+            c_inp = sum(r.get("input_tokens") or 0 for r in bucket)
+            c_cinp = sum(r.get("cached_input_tokens") or 0 for r in bucket)
+            c_out = sum(r.get("output_tokens") or 0 for r in bucket)
+            c_uncached = max(c_inp - c_cinp, 0)
+            bm_cny = (c_uncached / 1_000_000.0 * 21.60) + (c_cinp / 1_000_000.0 * 2.16) + (c_out / 1_000_000.0 * 108.00)
+            bm_usd = bm_cny / USD_TO_CNY
+            diff_cny = max(bm_cny - p_cny, 0)
+            saved_pct = round((diff_cny / bm_cny) * 100, 1) if bm_cny > 0 else 0
+            claude_benchmark = {
+                "benchmark_model": "claude-3-5-sonnet",
+                "benchmark_name": "Claude 3.5 Sonnet 官方原生对标",
+                "benchmark_cny": round(bm_cny, 2),
+                "benchmark_usd": round(bm_usd, 2),
+                "benchmark_cny_text": f"¥{bm_cny:,.2f}",
+                "benchmark_usd_text": f"${bm_usd:,.2f}",
+                "saved_cny_text": f"¥{diff_cny:,.2f}",
+                "saved_percent": saved_pct,
+            }
+
         agents.append(
             {
                 "id": provider.id,
@@ -637,6 +662,7 @@ def build_dashboard(
                 "message": state.get("message", "等待首次扫描"),
                 "metadata": provider_metadata,
                 "reconciliation": range_reconciliation.get(provider.id, {}),
+                "claude_benchmark": claude_benchmark,
             }
         )
 
@@ -675,6 +701,7 @@ def build_dashboard(
                 "cost_usd_text": cost_info["cost_usd_text"],
                 "pricing_source": cost_info["pricing_source"],
                 "pricing_model": cost_info["pricing_model_matched"],
+                "unit_rate_text": cost_info.get("unit_rate_text", ""),
             }
         )
     models.sort(key=lambda item: item["total"], reverse=True)
@@ -700,6 +727,11 @@ def build_dashboard(
     summary_metric["estimated_cost_usd"] = round(total_cost_usd, 2)
     summary_metric["cost_cny_text"] = f"¥{total_cost_cny:,.2f}"
     summary_metric["cost_usd_text"] = f"${total_cost_usd:,.2f}"
+    if selected_agent == "claude":
+        for a in agents:
+            if a["id"] == "claude" and a.get("claude_benchmark"):
+                summary_metric["claude_benchmark"] = a["claude_benchmark"]
+                break
 
     payload = {
         "meta": {

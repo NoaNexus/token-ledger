@@ -208,16 +208,19 @@ html.light .ambient-glow {
    3D 浮雕与镜面高光反射 (来自数字后花园旗舰设计)
    ========================================================================== */
 .tilt-wrapper {
-  perspective: 1200px;
+  perspective: none;
 }
-.tilt-card {
+.tilt-card, .glass-card {
   position: relative;
-  border-radius: 24px;
-  transform-style: preserve-3d;
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease, border-color 0.25s ease;
-  will-change: transform;
+  border-radius: 20px;
+  /* 确保字体渲染 100% 锐利，杜绝 3D 透视变换与 GPU 纹理重采样导致的模糊 */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  transform: none !important;
+  transition: border-color 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease;
 }
-.tilt-card:hover {
+.tilt-card:hover, .glass-card:hover {
   box-shadow: var(--shadow-hover);
   border-color: var(--border-focus);
 }
@@ -231,7 +234,7 @@ html.light .ambient-glow {
   opacity: 0;
   transition: opacity 0.3s;
 }
-.tilt-card:hover .specular-glare {
+.tilt-card:hover .specular-glare, .glass-card:hover .specular-glare {
   opacity: 1;
 }
 html.dark .specular-glare, [data-theme="dark"] .specular-glare {
@@ -241,14 +244,6 @@ html.dark .specular-glare, [data-theme="dark"] .specular-glare {
 .glass-card {
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
-  border-radius: 20px;
-  box-shadow: var(--shadow-card);
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease, opacity 0.2s ease;
-  position: relative;
-}
-.glass-card:hover {
-  border-color: var(--border-focus);
-  box-shadow: var(--shadow-hover);
 }
 
 /* App Shell */
