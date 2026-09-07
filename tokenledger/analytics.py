@@ -580,7 +580,9 @@ def build_dashboard(
     daily: list[dict[str, Any]] = []
     cursor = start_date
     while cursor <= local_today:
-        metric = _metrics(daily_buckets.get(cursor, []))
+        day_rows = daily_buckets.get(cursor, [])
+        metric = _metrics(day_rows)
+        d_cny, d_usd, d_cny_t, d_usd_t = _calculate_total_cost(day_rows)
         daily.append(
             {
                 "date": cursor.isoformat(),
@@ -589,6 +591,10 @@ def build_dashboard(
                 "cached_input": metric["cached_input"],
                 "output": metric["output"],
                 "estimated_total": metric["estimated_total"],
+                "cost_cny": d_cny,
+                "cost_usd": d_usd,
+                "cost_cny_text": d_cny_t,
+                "cost_usd_text": d_usd_t,
             }
         )
         cursor += timedelta(days=1)

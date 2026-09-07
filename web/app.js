@@ -926,6 +926,7 @@ function trendPanel(daily) {
             <div style="color:var(--text-secondary)">输入: <span id="inspectBarInput">${compactNumber(latest.input)}</span></div>
             <div style="color:#34D399">缓存: <span id="inspectBarCache">${compactNumber(latest.cached_input)}</span></div>
             <div style="color:#60A5FA;font-weight:600">净用量: <span id="inspectBarNet">${compactNumber(latest.net_usage || (latest.total - latest.cached_input))}</span></div>
+            <div style="color:#10B981;font-weight:600">等额价值: <span id="inspectBarCost">${latest.cost_cny_text || '¥0.00'}</span></div>
           </div>
         </div>
       </div>
@@ -1040,7 +1041,7 @@ function renderSplineChart(daily) {
       const ttDate = $("#tooltipDate");
       if (ttDate) ttDate.textContent = `${nearest.date}`;
       const ttTotal = $("#tooltipTotal");
-      if (ttTotal) ttTotal.textContent = `${Number(nearest.total || 0).toLocaleString("zh-CN")} Token`;
+      if (ttTotal) ttTotal.textContent = `${Number(nearest.total || 0).toLocaleString("zh-CN")} Token${nearest.cost_cny_text ? ' (' + nearest.cost_cny_text + ')' : ''}`;
       const ttInput = $("#tooltipInput");
       if (ttInput) ttInput.textContent = Number(nearest.input || 0).toLocaleString("zh-CN");
       const ttCache = $("#tooltipCache");
@@ -1061,6 +1062,8 @@ function renderSplineChart(daily) {
       if (barCache) barCache.textContent = Number(nearest.cached_input || 0).toLocaleString("zh-CN");
       const barNet = $("#inspectBarNet");
       if (barNet) barNet.textContent = Number(netVal).toLocaleString("zh-CN");
+      const barCost = $("#inspectBarCost");
+      if (barCost) barCost.textContent = nearest.cost_cny_text || '¥0.00';
     });
   };
 
