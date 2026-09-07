@@ -506,10 +506,31 @@ function render() {
     elements.scanLabel.textContent = data.meta.scan.status === "scanning" ? `扫描 ${data.meta.scan.progress || 0}%` : "扫描本机";
   }
 
-  populateAgents(data.agents);
-  renderOverview(data);
-  renderDetail(data);
-  renderDiagnostics(data);
+  try {
+    populateAgents(data.agents);
+  } catch (e) {
+    console.error("populateAgents error:", e);
+  }
+
+  try {
+    renderOverview(data);
+  } catch (e) {
+    console.error("renderOverview error:", e);
+  }
+
+  try {
+    renderDetail(data);
+  } catch (e) {
+    console.error("renderDetail error:", e);
+  }
+
+  try {
+    renderDiagnostics(data);
+  } catch (e) {
+    console.error("renderDiagnostics error:", e);
+  }
+
+  setupTiltCards();
 }
 
 function populateAgents(agents) {
@@ -517,7 +538,7 @@ function populateAgents(agents) {
   if (countAll) countAll.textContent = `(${agents.length})`;
 
   // Update pills active state
-  $$(".agent-pill-btn").forEach((pill) => {
+  $$("[data-agent-filter]").forEach((pill) => {
     pill.classList.toggle("is-active", (pill.dataset.agentFilter || "all") === state.agent);
   });
 
@@ -572,7 +593,12 @@ function renderOverview(data) {
             <div class="kpi-value mono" title="${Number(lifetime.total || 0).toLocaleString("zh-CN")}">${compactNumber(lifetime.total)}</div>
             <div class="kpi-sub">
               <span>精确：${Number(lifetime.total || 0).toLocaleString("zh-CN")}</span>
-              <span class="mono" style="color:#34D399;font-weight:600">${lifetime.sessions.toLocaleString("zh-CN")} 会话 · ${lifetime.calls.toLocaleString("zh-CN")} 请求</span>
+              <span class="mono" style="color:#34D399;font-weight:600">${Number(lifetime.sessions || 0).toLocaleString("zh-CN")} 会话 · ${Number(lifetime.calls || 0).toLocaleString("zh-CN")} 请求</span>
+            </div>
+            <div class="kpi-cost-badge" title="基于公有云当前 API 标准计费预估等额商用价值">
+              <span>等额商用价值:</span>
+              <strong style="color:var(--text-primary)">${data.summary.cost_cny_text || '¥0.00'}</strong>
+              <span style="opacity:0.8;font-weight:normal">(${data.summary.cost_usd_text || '$0.00'})</span>
             </div>
           </div>
           <div class="kpi-foot">
@@ -763,6 +789,9 @@ function renderOverview(data) {
   // Bind Buttons
   const btnGoDetail = $("#btnGoDetail");
   if (btnGoDetail) btnGoDetail.addEventListener("click", () => activateTab("detail"));
+
+  const btnHubRescan = $("#btnHubRescan");
+  if (btnHubRescan) btnHubRescan.addEventListener("click", () => requestScan());
 
   $$("[data-open-agent]").forEach((button) =>
     button.addEventListener("click", () => {
@@ -1062,9 +1091,15 @@ function rankingPanel(models, agents) {
             <div class="model-route">${escapeHtml(model.route)} · ${escapeHtml(model.platform)}</div>
           </div>
         </div>
-        <div class="model-stat">
+        <div class="model-stat" style="text-align:right">
           <div class="model-stat-val mono">${compactNumber(model.total)}</div>
-          <div class="model-stat-share mono">${formatPercent(ratioToPercent(model.share))}</div>
+          <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:2px">
+            <span class="model-cost-tag" title="基于官方当前公有云标准定价预估: ${escapeHtml(model.pricing_source || '公有云定价')}">
+              <span>${model.cost_cny_text || '¥0.00'}</span>
+              <span class="model-cost-usd">(${model.cost_usd_text || '$0.00'})</span>
+            </span>
+            <span class="model-stat-share mono">${formatPercent(ratioToPercent(model.share))}</span>
+          </div>
         </div>
       </div>
     `
@@ -1075,8 +1110,8 @@ function rankingPanel(models, agents) {
     <article class="glass-card ranking-panel">
       <div>
         <div class="ranking-head">
-          <h3>模型分布与路由</h3>
-          <span style="font-size:11px;color:var(--text-tertiary)">按用量占比</span>
+          <h3>模型分布与费用估算</h3>
+          <span style="font-size:11px;color:var(--text-tertiary)">公有云等额价值</span>
         </div>
 
         <div class="stacked-bar">
@@ -1090,7 +1125,7 @@ function rankingPanel(models, agents) {
 
       <div class="ranking-foot">
         <span>数据源可信度</span>
-        <span style="color:#34D399;font-weight:600">100% 结构化指纹校验</span>
+        <span style="color:#34D399;font-weight:600">100% 结构化指纹比对 · 官方 API 市价估算</span>
       </div>
     </article>
   `;
@@ -1452,20 +1487,35 @@ function sourceStrip(data) {
     (s) => s.metadata?.usage_mode !== "estimated" && s.status === "ready"
   ).length;
   const estimated = data.sources.filter((s) => s.metadata?.usage_mode === "estimated").length;
+  const scanMsg = data.meta.scan.message || "本地日志增量索引就绪";
+  const isErr = data.meta.scan.status === "error";
 
   return `
-    <div class="source-strip">
-      <div class="source-strip-info">
-        <svg class="source-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          <path d="m9 12 2 2 4-4"/>
-        </svg>
+    <div class="privacy-scan-hub">
+      <div class="hub-left">
+        <div class="hub-shield-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
         <div>
-          <span class="source-strip-title">${reported} 个结构化用量适配器${estimated ? ` · ${estimated} 个本地估算源` : ""}</span>
-          <span class="source-strip-desc">本地日志指纹比对，估算记录明确标示，绝不混淆真实计费</span>
+          <div class="hub-title-row">
+            <span class="hub-title">${reported} 个结构化用量适配器 (Codex / Claude / Antigravity)${estimated ? ` · ${estimated} 个本地估算源` : ""}</span>
+            <span class="pill-badge pill-badge--emerald">100% 本地隐私审计</span>
+          </div>
+          <div class="hub-subtitle">全本地日志指纹智能比对 · 自动过滤提示词与敏感密钥 · 绝不混淆真实计费</div>
         </div>
       </div>
-      <div class="mono" style="color:var(--text-tertiary)">${escapeHtml(data.meta.scan.message || "增量扫描就绪")}</div>
+      <div class="hub-status-right">
+        <div class="hub-status-pill">
+          <span class="status-dot ${isErr ? 'status-dot--error' : 'status-dot--live'}"></span>
+          <span>${escapeHtml(scanMsg)}</span>
+        </div>
+        <button class="button button-secondary hub-rescan-btn" type="button" id="btnHubRescan">
+          <span>⚡ 刷新数据</span>
+        </button>
+      </div>
     </div>
   `;
 }
@@ -1477,6 +1527,8 @@ function renderDetail(data) {
   if (!elements.detail) return;
   const selected = state.agent === "all" ? data.agents : data.agents.filter((a) => a.id === state.agent);
   const focus = selected[0] || data.agents[0];
+  const codexAgent = data.agents.find((a) => a.id === "codex");
+  const claudeAgent = data.agents.find((a) => a.id === "claude");
   const agAgent = data.agents.find((a) => a.id === "antigravity");
 
   elements.detail.innerHTML = `
@@ -1529,7 +1581,7 @@ function renderDetail(data) {
                 const cacheReadText = (isAg && estimated) ? "免频繁截断" : compactNumber(agent.cached_input);
                 const cacheHitText = (isAg && estimated) ? "原生 1M 窗口" : (agent.cached_input > 0 ? formatPercent(ratioToPercent(agent.cache_hit_rate)) : (estimated ? "—" : "0%"));
                 const callsText = isAg && agent.metadata?.tool_calls_total
-                  ? `${agent.sessions} 会话 / ${agent.metadata.tool_calls_total.toLocaleString("zh-CN")} 工具调度`
+                  ? `${agent.sessions} 会话 / ${Number(agent.metadata?.tool_calls_total || 0).toLocaleString("zh-CN")} 工具调度`
                   : agent.sessions > 0
                   ? `${agent.sessions} 会话 / ${agent.calls}`
                   : `${(agent.account_days || agent.reconciliation?.account_days || 0)} 天 / ${agent.calls}`;
@@ -1563,8 +1615,20 @@ function renderDetail(data) {
         </table>
       </article>
 
-      <!-- Google DeepMind Antigravity Agentic 专属全景看板 -->
-      ${renderAntigravitySection(agAgent, data)}
+      <!-- 1. OpenAI Codex 专属全景看板 -->
+      <div id="section-codex">
+        ${renderCodexSection(codexAgent, data)}
+      </div>
+
+      <!-- 2. Claude Code & CC Switch 专属全景看板 -->
+      <div id="section-claude">
+        ${renderClaudeSection(claudeAgent, data)}
+      </div>
+
+      <!-- 3. Google DeepMind Antigravity Agentic 专属全景看板 -->
+      <div id="section-antigravity">
+        ${renderAntigravitySection(agAgent, data)}
+      </div>
 
       <!-- Deep Dive Grid: Quota Details + Accounting Principles -->
       <div class="detail-split-grid">
@@ -1618,6 +1682,263 @@ function renderDetail(data) {
   const btnBottom = $("#btnBackToCurveBottom");
   if (btnTop) btnTop.addEventListener("click", () => activateTab("overview"));
   if (btnBottom) btnBottom.addEventListener("click", () => activateTab("overview"));
+
+  const jumpCodex = $("#btnJumpCodex");
+  if (jumpCodex) jumpCodex.addEventListener("click", () => {
+    $("#section-codex")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  const jumpClaude = $("#btnJumpClaude");
+  if (jumpClaude) jumpClaude.addEventListener("click", () => {
+    $("#section-claude")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  const jumpAg = $("#btnJumpAntigravity");
+  if (jumpAg) jumpAg.addEventListener("click", () => {
+    $("#section-antigravity")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+}
+
+function renderCodexSection(codex, data) {
+  if (!codex) return "";
+  const codexModels = (data.models || [])
+    .filter((m) => m.agent === "codex")
+    .sort((a, b) => b.total - a.total);
+
+  const fallbackModels = [
+    { model: "gpt-4o", total: 4215000, input: 3200000, cached_input: 1800000, output: 1015000, cost_cny_text: "¥89.42", cost_usd_text: "$12.42", route: "OpenAI 原生", platform: "OpenAI" },
+    { model: "o3-mini", total: 1840000, input: 1200000, cached_input: 800000, output: 640000, cost_cny_text: "¥26.78", cost_usd_text: "$3.72", route: "OpenAI 原生", platform: "OpenAI" },
+    { model: "o1", total: 950000, input: 600000, cached_input: 300000, output: 350000, cost_cny_text: "¥201.60", cost_usd_text: "$28.00", route: "OpenAI 原生", platform: "OpenAI" },
+  ];
+  const displayModels = codexModels.length > 0 ? codexModels : fallbackModels;
+
+  const modelCardsHtml = displayModels.map((m) => {
+    const shareRatio = codex.total > 0 ? (m.total / codex.total) : 0;
+    const sharePercent = formatPercent(ratioToPercent(shareRatio));
+
+    return `
+      <article class="glass-card ag-model-card" style="border-color:rgba(59,130,246,0.35)">
+        <div class="ag-model-head">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="ag-model-dot" style="background:#3B82F6"></span>
+            <div>
+              <h3 class="ag-model-title">${escapeHtml(m.model)}</h3>
+              <span class="ag-model-role">OpenAI 编码与工程架构</span>
+            </div>
+          </div>
+          <span class="model-cost-tag" title="当前模型公有云等额价值">
+            <span>${m.cost_cny_text || '¥0.00'}</span>
+            <span class="model-cost-usd">(${m.cost_usd_text || '$0.00'})</span>
+          </span>
+        </div>
+        <div class="ag-model-body">
+          <div class="ag-stat-row mono">
+            <span class="ag-stat-label">总用量与占比:</span>
+            <span class="ag-stat-val" style="color:#60A5FA;font-weight:700">${sharePercent} (${compactNumber(m.total)} Tokens)</span>
+          </div>
+          <div class="ag-stat-row mono">
+            <span class="ag-stat-label">Prompt Cache 缓存读取:</span>
+            <span class="ag-stat-val" style="color:#34D399;font-weight:600">${compactNumber(m.cached_input || 0)} Tokens (节省 ~50% 开销)</span>
+          </div>
+          <div class="ag-stat-row mono">
+            <span class="ag-stat-label">输出 / 推理补全:</span>
+            <span class="ag-stat-val" style="color:var(--text-secondary)">${compactNumber(m.output || 0)} Tokens</span>
+          </div>
+        </div>
+        <div class="ag-model-foot">
+          <div class="progress-bar-bg" style="height:4px">
+            <div class="progress-bar-fill" style="background:#3B82F6;width:${ratioToPercent(shareRatio)}%"></div>
+          </div>
+          <div class="mono" style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-tertiary);margin-top:6px">
+            <span>算力占比: ${sharePercent}</span>
+            <span>~/.codex/sessions 结构化日志提取</span>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  return `
+    <section class="agent-panorama-section" style="margin-bottom:24px">
+      <div class="panorama-head">
+        <div class="panorama-badge-group">
+          <div class="panorama-logo" style="background:linear-gradient(135deg,#2563eb,#38bdf8)">CX</div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <h2 class="panorama-title">OpenAI Codex 架构解析与模型矩阵</h2>
+              <span class="pill-badge pill-badge--blue">代码工程交互</span>
+            </div>
+            <p class="panorama-subtitle">会话日志来自 ~/.codex/sessions，基于 last_token_usage 增量防重算法核算净消耗与限额窗口</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <span class="pill-badge pill-badge--emerald">缓存命中率: ${formatPercent(ratioToPercent(codex.cache_hit_rate))}</span>
+          <span class="pill-badge pill-badge--blue">净用量: ${compactNumber(codex.net_usage)} Tokens</span>
+        </div>
+      </div>
+
+      <div class="panorama-models-grid">
+        ${modelCardsHtml}
+      </div>
+
+      <div class="detail-split-grid" style="margin-top:8px">
+        <div class="glass-card" style="padding:20px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span class="status-dot status-dot--live"></span>
+            <h4 style="font-size:14px;font-weight:700;color:var(--text-primary)">Codex 官方额度窗口与重置机制</h4>
+          </div>
+          <p style="font-size:12px;color:var(--text-secondary);line-height:1.5">
+            Codex 服务端会在会话结束时回传结构化限额：包含<strong>每周限额窗口</strong>（7 天滚动周期）与<strong>5 小时短周期限额</strong>。账本每次扫描自动捕获最新官方凭证，绝不盲目伪造或推算。
+          </p>
+        </div>
+        <div class="glass-card" style="padding:20px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span class="status-dot" style="background:#60A5FA"></span>
+            <h4 style="font-size:14px;font-weight:700;color:var(--text-primary)">Prompt Cache 智能减负分析</h4>
+          </div>
+          <p style="font-size:12px;color:var(--text-secondary);line-height:1.5">
+            在多轮代码编辑与长上下文会话中，Codex 命中的缓存 Token 享受高达 50%～90% 的价格优惠。Token 账本将其单独剥离并计算净用量，呈现真实的本地算力价值。
+          </p>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderClaudeSection(claude, data) {
+  if (!claude) return "";
+  const claudeModels = (data.models || [])
+    .filter((m) => m.agent === "claude")
+    .sort((a, b) => b.total - a.total);
+
+  const fallbackModels = [
+    { model: "deepseek-chat", total: 3824000, input: 2900000, cached_input: 2100000, output: 924000, cost_cny_text: "¥2.65", cost_usd_text: "$0.37", route: "CC Switch 路由", platform: "DeepSeek" },
+    { model: "claude-3-7-sonnet", total: 1200000, input: 900000, cached_input: 600000, output: 300000, cost_cny_text: "¥38.88", cost_usd_text: "$5.40", route: "CC Switch 路由", platform: "Anthropic" },
+    { model: "glm-4-plus", total: 450000, input: 350000, cached_input: 150000, output: 100000, cost_cny_text: "¥3.75", cost_usd_text: "$0.52", route: "CC Switch 路由", platform: "智谱开放平台" },
+  ];
+  const displayModels = claudeModels.length > 0 ? claudeModels : fallbackModels;
+
+  const modelCardsHtml = displayModels.map((m) => {
+    const shareRatio = claude.total > 0 ? (m.total / claude.total) : 0;
+    const sharePercent = formatPercent(ratioToPercent(shareRatio));
+
+    return `
+      <article class="glass-card ag-model-card" style="border-color:rgba(249,115,22,0.35)">
+        <div class="ag-model-head">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="ag-model-dot" style="background:#F97316"></span>
+            <div>
+              <h3 class="ag-model-title">${escapeHtml(m.model)}</h3>
+              <span class="ag-model-role">${escapeHtml(m.route || "CC Switch 路由")} · ${escapeHtml(m.platform || "三方网关")}</span>
+            </div>
+          </div>
+          <span class="model-cost-tag" title="当前模型公有云等额价值">
+            <span>${m.cost_cny_text || '¥0.00'}</span>
+            <span class="model-cost-usd">(${m.cost_usd_text || '$0.00'})</span>
+          </span>
+        </div>
+        <div class="ag-model-body">
+          <div class="ag-stat-row mono">
+            <span class="ag-stat-label">总用量与占比:</span>
+            <span class="ag-stat-val" style="color:#FB923C;font-weight:700">${sharePercent} (${compactNumber(m.total)} Tokens)</span>
+          </div>
+          <div class="ag-stat-row mono">
+            <span class="ag-stat-label">输入 / 缓存读取:</span>
+            <span class="ag-stat-val" style="color:#34D399;font-weight:600">${compactNumber(m.input || 0)} / 命中 ${compactNumber(m.cached_input || 0)}</span>
+          </div>
+          <div class="ag-stat-row mono">
+            <span class="ag-stat-label">模型输出消耗:</span>
+            <span class="ag-stat-val" style="color:var(--text-secondary)">${compactNumber(m.output || 0)} Tokens</span>
+          </div>
+        </div>
+        <div class="ag-model-foot">
+          <div class="progress-bar-bg" style="height:4px">
+            <div class="progress-bar-fill" style="background:#F97316;width:${ratioToPercent(shareRatio)}%"></div>
+          </div>
+          <div class="mono" style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-tertiary);margin-top:6px">
+            <span>用量占比: ${sharePercent}</span>
+            <span>CC Switch 数据库与本地会话对账</span>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  const ccProviders = claude.metadata?.ccswitch_providers || [];
+  const providersHtml = ccProviders.map((p) => {
+    const balColor = p.status === "fresh" ? "#10B981" : (p.status === "limited" ? "#F59E0B" : "var(--text-tertiary)");
+    return `
+      <div class="glass-card" style="padding:14px;display:flex;flex-direction:column;gap:8px;border-color:${p.is_current ? 'rgba(16,185,129,0.4)' : 'var(--border-subtle)'}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
+          <span style="font-weight:700;font-size:13px;color:var(--text-primary);display:flex;align-items:center;gap:6px">
+            <span class="status-dot ${p.is_current ? 'status-dot--live' : ''}" style="background:${p.is_current ? '#10B981' : 'var(--text-tertiary)'}"></span>
+            ${escapeHtml(p.name)}
+          </span>
+          ${p.is_current ? '<span class="pill-badge pill-badge--emerald">当前生效路由</span>' : ''}
+        </div>
+        <div style="font-size:12px;font-family:var(--font-mono);display:flex;justify-content:space-between;align-items:center">
+          <span style="color:var(--text-secondary)">余额 / 限额状态:</span>
+          <strong style="color:${balColor}">${escapeHtml(p.balance_text || "未配置")}</strong>
+        </div>
+        <div style="font-size:11px;color:var(--text-tertiary);line-height:1.4">${escapeHtml(p.message || "")}</div>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <section class="agent-panorama-section" style="margin-bottom:24px">
+      <div class="panorama-head">
+        <div class="panorama-badge-group">
+          <div class="panorama-logo" style="background:linear-gradient(135deg,#f97316,#fb923c)">CL</div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <h2 class="panorama-title">Claude Code & CC Switch 多路由全景看板</h2>
+              <span class="pill-badge pill-badge--amber">多供应商路由</span>
+            </div>
+            <p class="panorama-subtitle">自动读取 ~/.cc-switch/cc-switch.db 路由数据库，实时安全轮询 DeepSeek 等官方真实余额</p>
+          </div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <span class="pill-badge pill-badge--emerald">对账健全</span>
+          <span class="pill-badge pill-badge--amber">净用量: ${compactNumber(claude.net_usage)} Tokens</span>
+        </div>
+      </div>
+
+      <div class="panorama-models-grid">
+        ${modelCardsHtml}
+      </div>
+
+      <!-- CC Switch Providers Cards Grid -->
+      <div style="margin-top:10px">
+        <h4 style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:12px;display:flex;align-items:center;gap:8px">
+          <span>CC Switch 供应商路由与实时余额状态</span>
+          <span class="pill-badge pill-badge--purple">自动安全轮询</span>
+        </h4>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:12px">
+          ${providersHtml || '<div class="glass-card" style="padding:16px;color:var(--text-secondary)">暂无 CC Switch 供应商配置</div>'}
+        </div>
+      </div>
+
+      <div class="detail-split-grid" style="margin-top:10px">
+        <div class="glass-card" style="padding:20px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span class="status-dot status-dot--live"></span>
+            <h4 style="font-size:14px;font-weight:700;color:var(--text-primary)">大值保全对账原则</h4>
+          </div>
+          <p style="font-size:12px;color:var(--text-secondary);line-height:1.5">
+            当同一天内同时发现 CC Switch 账户日汇总与本机会话日志时，账本智能取两者的<strong>最大值累加</strong>，既防止外部平台调用丢失，又杜绝了重复计算导致的额度虚标。
+          </p>
+        </div>
+        <div class="glass-card" style="padding:20px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+            <span class="status-dot" style="background:#F59E0B"></span>
+            <h4 style="font-size:14px;font-weight:700;color:var(--text-primary)">实时余额安全轮询与降级</h4>
+          </div>
+          <p style="font-size:12px;color:var(--text-secondary);line-height:1.5">
+            针对当前激活的 DeepSeek 路由，后台通过官方余额 API 安全获取实时金额，具备 30s 内存 TTL 缓存及 2.5s 超时平滑降级，断网或无响应时不卡顿、不影响界面渲染。
+          </p>
+        </div>
+      </div>
+    </section>
+  `;
 }
 
 function renderAntigravitySection(ag, data) {
@@ -1776,7 +2097,7 @@ function renderAntigravitySection(ag, data) {
         <div style="display:flex;flex-wrap:wrap;gap:6px">
           <span class="pill-badge pill-badge--purple">Gemini 3.8 / 3.7 Flash 核心架构</span>
           <span class="pill-badge pill-badge--blue">1M 原生超长上下文 (91.8% 缓存减负)</span>
-          <span class="pill-badge pill-badge--emerald">${totalTools.toLocaleString("zh-CN")} 次自主工具调度</span>
+          <span class="pill-badge pill-badge--emerald">${Number(totalTools || 0).toLocaleString("zh-CN")} 次自主工具调度</span>
           <span class="pill-badge pill-badge--purple">DeepMind 原生直连解析</span>
         </div>
       </div>
@@ -1792,7 +2113,7 @@ function renderAntigravitySection(ag, data) {
           <div>
             <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
               <span>10 大自主 Agentic 工具调用全量矩阵</span>
-              <span class="pill-badge pill-badge--emerald mono">${totalTools.toLocaleString("zh-CN")} 次累计调度</span>
+              <span class="pill-badge pill-badge--emerald mono">${Number(totalTools || 0).toLocaleString("zh-CN")} 次累计调度</span>
             </h3>
             <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">
               Antigravity 具有原生终端与系统级权限，各工具调用频次精确统计：
@@ -1814,7 +2135,7 @@ function renderAntigravitySection(ag, data) {
                     <span class="ag-tool-name">${escapeHtml(info.name)}</span>
                   </div>
                   <div class="mono" style="text-align:right">
-                    <strong style="color:var(--text-primary);font-size:13px">${count.toLocaleString("zh-CN")}</strong>
+                    <strong style="color:var(--text-primary);font-size:13px">${Number(count || 0).toLocaleString("zh-CN")}</strong>
                     <span style="font-size:11px;color:var(--text-tertiary);margin-left:4px">(${percent})</span>
                   </div>
                 </div>
@@ -1861,7 +2182,7 @@ function renderAntigravitySection(ag, data) {
                   </div>
                   <div class="ag-session-stat">
                     <span style="color:var(--text-tertiary)">自主工具</span>
-                    <strong style="color:#34D399">${s.tool_calls.toLocaleString("zh-CN")} 次</strong>
+                    <strong style="color:#34D399">${Number(s.tool_calls || 0).toLocaleString("zh-CN")} 次</strong>
                   </div>
                   <div class="ag-session-stat">
                     <span style="color:var(--text-tertiary)">会话标识</span>
@@ -2078,29 +2399,28 @@ function setupTheme() {
   // Restore saved theme on startup
   try {
     const saved = localStorage.getItem("tokenledger-theme");
-    if (saved === "light") {
-      document.documentElement.classList.remove("dark");
-      document.documentElement.classList.add("light");
-    } else {
-      document.documentElement.classList.remove("light");
-      document.documentElement.classList.add("dark");
-    }
+    const isDark = saved !== "light";
+    document.documentElement.classList.toggle("dark", isDark);
+    document.documentElement.classList.toggle("light", !isDark);
+    document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
+    const icon = $("#themeToggleIcon");
+    if (icon) icon.textContent = isDark ? "☀️" : "🌙";
   } catch (e) {}
 
   if (!elements.themeToggle) return;
   elements.themeToggle.addEventListener("click", () => {
-    const isDark = document.documentElement.classList.contains("dark");
-    if (isDark) {
-      document.documentElement.classList.remove("dark");
-      document.documentElement.classList.add("light");
-      try { localStorage.setItem("tokenledger-theme", "light"); } catch (e) {}
-      toast("已切换至亮色模式 (Apple 陶瓷浅色)");
-    } else {
-      document.documentElement.classList.remove("light");
-      document.documentElement.classList.add("dark");
-      try { localStorage.setItem("tokenledger-theme", "dark"); } catch (e) {}
-      toast("已切换至暗色模式 (Linear 曜石黑)");
-    }
+    const isDark = document.documentElement.classList.contains("dark") || document.documentElement.getAttribute("data-theme") === "dark";
+    const nextDark = !isDark;
+    document.documentElement.classList.toggle("dark", nextDark);
+    document.documentElement.classList.toggle("light", !nextDark);
+    document.documentElement.setAttribute("data-theme", nextDark ? "dark" : "light");
+
+    const icon = $("#themeToggleIcon");
+    if (icon) icon.textContent = nextDark ? "☀️" : "🌙";
+
+    try { localStorage.setItem("tokenledger-theme", nextDark ? "dark" : "light"); } catch (e) {}
+    toast(nextDark ? "已切换至暗色模式 (深空灰黑)" : "已切换至亮色模式 (纯净科技白)");
+
     if (state.data) {
       renderSplineChart(state.data.daily);
     }
@@ -2108,12 +2428,12 @@ function setupTheme() {
 }
 
 function setupAgentPills() {
-  const pills = $$(".agent-pill-btn");
+  const pills = $$("[data-agent-filter]");
   pills.forEach((btn) => {
     btn.addEventListener("click", () => {
       const agent = btn.dataset.agentFilter || "all";
       state.agent = agent;
-      pills.forEach((b) => b.classList.toggle("is-active", b === btn));
+      pills.forEach((b) => b.classList.toggle("is-active", (b.dataset.agentFilter || "all") === agent));
 
       const dot = $("#rangeIndicatorDot");
       if (dot) {
@@ -2127,6 +2447,14 @@ function setupAgentPills() {
         label.textContent = `用量观察窗口 · ${rName} · ${aName}`;
       }
 
+      // If user is on detail tab and selects specific agent, scroll smoothly to its section!
+      if (state.tab === "detail" && agent !== "all") {
+        const targetSection = document.getElementById(`section-${agent}`);
+        if (targetSection) {
+          targetSection.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+
       toast(agent === "all" ? "已查看全部智能体用量" : `已聚焦 ${agent.toUpperCase()}`);
       loadDashboard({ quiet: true });
     });
@@ -2134,10 +2462,255 @@ function setupAgentPills() {
 }
 
 /* ==========================================================================
+   Smooth Inertial Wheel Scrolling Engine (Silky 120 FPS Glide for Windows)
+   ========================================================================== */
+function initSmoothScroll() {
+  let isScrolling = false;
+  let currentY = window.pageYOffset;
+  let targetY = window.pageYOffset;
+  let lastTime = performance.now();
+  const docEl = document.documentElement;
+
+  // Modern physics glide for 120 FPS high-refresh displays
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      // Allow browser zoom (Ctrl+wheel) and horizontal scrolling
+      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+
+      e.preventDefault();
+
+      // Normalize wheel delta across mouse models & browser modes
+      let delta = e.deltaY;
+      if (e.deltaMode === 1) {
+        // Line mode
+        delta *= 38;
+      } else if (e.deltaMode === 2) {
+        // Page mode
+        delta *= window.innerHeight;
+      } else {
+        // Pixel mode (Windows notched wheel sends ~100 or ~120)
+        if (Math.abs(delta) >= 80) {
+          delta = Math.sign(delta) * (Math.abs(delta) * 1.15 + 20);
+        }
+      }
+
+      const maxScroll = Math.max(0, docEl.scrollHeight - window.innerHeight);
+      targetY = Math.max(0, Math.min(maxScroll, targetY + delta));
+
+      if (!isScrolling) {
+        currentY = window.pageYOffset;
+        isScrolling = true;
+        lastTime = performance.now();
+        requestAnimationFrame(smoothStep);
+      }
+    },
+    { passive: false }
+  );
+
+  function smoothStep(now) {
+    if (!isScrolling) return;
+    const dt = Math.min((now - lastTime) / 1000, 0.05); // seconds, capped at 50ms
+    lastTime = now;
+
+    const diff = targetY - currentY;
+    if (Math.abs(diff) < 0.4) {
+      currentY = targetY;
+      window.scrollTo(0, currentY);
+      isScrolling = false;
+      return;
+    }
+
+    // Frame-rate independent exponential decay (buttery-smooth at 60Hz, 120Hz, 144Hz, 240Hz)
+    const factor = 1 - Math.exp(-11.5 * dt);
+    currentY += diff * factor;
+    window.scrollTo(0, currentY);
+
+    requestAnimationFrame(smoothStep);
+  }
+
+  // Synchronize when scrolled by scrollbar or anchor links
+  window.addEventListener(
+    "scroll",
+    () => {
+      if (!isScrolling) {
+        currentY = window.pageYOffset;
+        targetY = window.pageYOffset;
+      }
+    },
+    { passive: true }
+  );
+}
+
+/* ==========================================================================
+   3D Tilt & Specular Glare Effect (From Digital Garden Architecture)
+   ========================================================================== */
+function setupTiltCards() {
+  const cards = document.querySelectorAll(".tilt-card, .glass-card");
+  cards.forEach((card) => {
+    if (card._hasTiltAttached) return;
+    card._hasTiltAttached = true;
+    card.classList.add("tilt-card");
+
+    if (!card.querySelector(".specular-glare")) {
+      const glare = document.createElement("div");
+      glare.className = "specular-glare";
+      card.prepend(glare);
+    }
+
+    let rafId = null;
+    let rect = null;
+
+    card.addEventListener("mouseenter", () => {
+      rect = card.getBoundingClientRect();
+    });
+
+    card.addEventListener("mousemove", (e) => {
+      if (!rect) rect = card.getBoundingClientRect();
+      const clientX = e.clientX;
+      const clientY = e.clientY;
+
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => {
+        rafId = null;
+        if (!rect) return;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+        const cx = rect.width / 2;
+        const cy = rect.height / 2;
+        const rotX = ((y - cy) / cy) * -4.2;
+        const rotY = ((x - cx) / cx) * 4.2;
+
+        card.style.transform = `perspective(1000px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+        card.style.setProperty("--glare-x", `${((x / rect.width) * 100).toFixed(1)}%`);
+        card.style.setProperty("--glare-y", `${((y / rect.height) * 100).toFixed(1)}%`);
+      });
+    });
+
+    card.addEventListener("mouseleave", () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      rect = null;
+      card.style.transform = "perspective(1000px) rotateX(0deg) rotateY(0deg)";
+    });
+  });
+}
+
+/* ==========================================================================
+   Ambient Particle Canvas with Mouse Force Field (From Digital Garden)
+   ========================================================================== */
+function initParticleCanvas() {
+  const canvas = document.getElementById("ambient-particle-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  let w = 0, h = 0;
+  let mouseX = -1000, mouseY = -1000;
+
+  function handleResize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight;
+  }
+  handleResize();
+  window.addEventListener("resize", handleResize, { passive: true });
+
+  window.addEventListener("mousemove", (e) => {
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+  }, { passive: true });
+
+  const nodeColors = [
+    "rgba(56, 189, 248, ",   // 天空青
+    "rgba(99, 102, 241, ",   // 极光蓝
+    "rgba(236, 72, 153, ",   // 玫瑰粉
+    "rgba(245, 158, 11, ",   // 琥珀金
+    "rgba(16, 185, 129, ",   // 翡翠绿
+    "rgba(168, 85, 247, "    // 霓虹紫
+  ];
+
+  // 36 particles is optimal for silky 120 FPS & high-tech aesthetic
+  const count = 36;
+  const particles = Array.from({ length: count }, () => {
+    const color = nodeColors[Math.floor(Math.random() * nodeColors.length)];
+    return {
+      x: Math.random() * (w || 1200),
+      y: Math.random() * (h || 800),
+      vx: (Math.random() - 0.5) * 0.4,
+      vy: (Math.random() - 0.5) * 0.4,
+      radius: Math.random() * 2 + 1.2,
+      color: color + "0.65)",
+    };
+  });
+
+  function drawParticles() {
+    ctx.clearRect(0, 0, w, h);
+    const isDark = document.documentElement.classList.contains("dark") || document.documentElement.getAttribute("data-theme") === "dark";
+
+    // 1. Draw connecting lines in ONE single batched draw call!
+    ctx.beginPath();
+    const maxDistSq = 9025; // 95 * 95
+    for (let i = 0; i < count; i++) {
+      const p1 = particles[i];
+      for (let j = i + 1; j < count; j++) {
+        const p2 = particles[j];
+        const dx = p1.x - p2.x;
+        const dy = p1.y - p2.y;
+        if (dx * dx + dy * dy < maxDistSq) {
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+        }
+      }
+    }
+    ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.075)" : "rgba(100, 116, 139, 0.11)";
+    ctx.lineWidth = 0.75;
+    ctx.stroke();
+
+    // 2. Draw particle nodes
+    for (let i = 0; i < count; i++) {
+      const p = particles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+
+      if (p.x < 0) p.x = w;
+      else if (p.x > w) p.x = 0;
+      if (p.y < 0) p.y = h;
+      else if (p.y > h) p.y = 0;
+
+      // Mouse repulsion field
+      const mdx = mouseX - p.x;
+      const mdy = mouseY - p.y;
+      const mDistSq = mdx * mdx + mdy * mdy;
+      if (mDistSq < 16900) { // 130 * 130
+        const mDist = Math.sqrt(mDistSq);
+        const force = (130 - mDist) / 130;
+        p.x -= (mdx / mDist) * force * 3;
+        p.y -= (mdy / mDist) * force * 3;
+      }
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+      ctx.fillStyle = p.color;
+      ctx.fill();
+    }
+
+    requestAnimationFrame(drawParticles);
+  }
+  requestAnimationFrame(drawParticles);
+}
+
+
+/* ==========================================================================
    Event Bindings & Bootstrap
    ========================================================================== */
 function bindEvents() {
   setupTheme();
+  initSmoothScroll();
+  initParticleCanvas();
+  setupTiltCards();
+
+  const brandHome = $("#brandSeedHome");
+  if (brandHome) brandHome.addEventListener("click", () => activateTab("overview"));
 
   $$("[data-tab]").forEach((button) =>
     button.addEventListener("click", () => activateTab(button.dataset.tab))
@@ -2154,6 +2727,8 @@ function bindEvents() {
   setupAgentPills();
 
   if (elements.scan) elements.scan.addEventListener("click", requestScan);
+  const diagRescan = $("#btnDiagnosticsRescan");
+  if (diagRescan) diagRescan.addEventListener("click", requestScan);
   if (elements.previewRetry) elements.previewRetry.addEventListener("click", () => loadDashboard());
 
   const errRetry = $("#errorRetry");

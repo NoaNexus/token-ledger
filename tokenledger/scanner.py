@@ -55,9 +55,12 @@ class ScanCoordinator:
         try:
             self._run(force)
         except Exception as error:
+            import logging
+            logging.exception("Token Ledger 增量扫描异常: %s", error)
+            err_desc = str(error).strip() or type(error).__name__
             self._set_status(
                 status="error",
-                message=f"扫描失败：{type(error).__name__}",
+                message=f"扫描异常：{type(error).__name__} ({err_desc[:60]})，请重试",
                 finished_at=utc_now(),
             )
         finally:
@@ -134,18 +137,30 @@ class ScanCoordinator:
             probe = adapter.probe()
             self.database.update_provider(agent, probe, utc_now())
             if isinstance(probe.metadata, dict) and probe.metadata.get("budget_windows"):
+                def _safe_float(val: Any) -> float | None:
+                    try:
+                        return float(val) if val is not None else None
+                    except (TypeError, ValueError):
+                        return None
+
+                def _safe_int(val: Any) -> int | None:
+                    try:
+                        return int(val) if val is not None else None
+                    except (TypeError, ValueError):
+                        return None
+
                 snapshots = [
                     QuotaSnapshot(
-                        snapshot_id=w.get("snapshot_id") or f"{agent}:{w.get('label')}",
+                        snapshot_id=str(w.get("snapshot_id") or f"{agent}:{w.get('label')}"),
                         agent=agent,
-                        label=w.get("label", ""),
-                        status=w.get("status", "fresh"),
-                        remaining_percent=w.get("remaining_percent"),
-                        used_percent=w.get("used_percent"),
-                        window_minutes=w.get("window_minutes"),
+                        label=str(w.get("label", "")),
+                        status=str(w.get("status", "fresh")),
+                        remaining_percent=_safe_float(w.get("remaining_percent")),
+                        used_percent=_safe_float(w.get("used_percent")),
+                        window_minutes=_safe_int(w.get("window_minutes")),
                         resets_at=w.get("resets_at"),
-                        updated_at=w.get("updated_at") or utc_now(),
-                        message=w.get("message", ""),
+                        updated_at=str(w.get("updated_at") or utc_now()),
+                        message=str(w.get("message", "")),
                     )
                     for w in probe.metadata["budget_windows"]
                     if w.get("remaining_percent") is not None

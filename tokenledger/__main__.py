@@ -26,7 +26,17 @@ def launch_desktop_window(url: str) -> None:
         for candidate in edge_paths:
             if candidate.is_file():
                 try:
-                    subprocess.Popen([str(candidate), f"--app={url}", "--window-size=1360,880"])
+                    subprocess.Popen([
+                        str(candidate),
+                        f"--app={url}",
+                        "--window-size=1360,880",
+                        "--enable-features=SmoothScrolling",
+                        "--enable-gpu-rasterization",
+                        "--enable-zero-copy",
+                        "--ignore-gpu-blocklist",
+                        "--disable-frame-rate-limit",
+                        "--max-gum-fps=120",
+                    ])
                     return
                 except Exception:
                     pass

@@ -198,3 +198,51 @@ def test_temporary_cc_switch_read_error_keeps_last_valid_account_rollup(tmp_path
     assert [row["event_id"] for row in database.usage_rows(agent="claude")] == [
         "last-good-rollup"
     ]
+
+
+def test_estimate_token_cost_and_dashboard_pricing(tmp_path: Path) -> None:
+    # Test individual estimation
+    cost_gemini = analytics.estimate_token_cost("gemini-3.8-flash", 1_000_000, 0, 1_000_000)
+    assert cost_gemini["cost_usd"] == 0.50
+    assert cost_gemini["cost_cny"] == 3.60
+    assert cost_gemini["cost_usd_text"] == "$0.50"
+    assert cost_gemini["cost_cny_text"] == "¥3.60"
+
+    cost_deepseek = analytics.estimate_token_cost("deepseek-chat", 1_000_000, 0, 1_000_000)
+    assert cost_deepseek["cost_cny"] == 3.00
+    assert cost_deepseek["cost_cny_text"] == "¥3.00"
+
+    # Test dashboard integration with pricing fields
+    database = TokenDatabase(tmp_path / "pricing_ledger.db")
+    parsed = ParsedFile(
+        events=[
+            UsageEvent(
+                event_id="pricing-event-1",
+                agent="antigravity",
+                route="Google Antigravity",
+                platform="Google DeepMind",
+                model="gemini-3.8-flash",
+                session_id="s1",
+                occurred_at="2026-09-01T01:00:00Z",
+                input_tokens=2_000_000,
+                cached_input_tokens=1_000_000,
+                output_tokens=500_000,
+                total_tokens=2_500_000,
+            )
+        ]
+    )
+    database.replace_file("f1", "antigravity", "fixture", 1, 1, parsed, "2026-09-01T02:00:00Z")
+    dash = build_dashboard(
+        database=database,
+        scan_status={"status": "ready", "progress": 100, "message": "OK"},
+        timezone_name="Asia/Shanghai",
+        days=30,
+        selected_agent=None,
+    )
+    assert "estimated_cost_cny" in dash["summary"]
+    assert "estimated_cost_usd" in dash["summary"]
+    assert "cost_cny_text" in dash["summary"]
+    assert len(dash["models"]) == 1
+    assert dash["models"][0]["cost_cny_text"] is not None
+    assert dash["models"][0]["cost_usd_text"] is not None
+

@@ -8,91 +8,106 @@
     <title>Token 账本 - 本机用量工作台</title>
     <link rel="icon" type="image/x-icon" href="./assets/token-ledger.ico">
     <link rel="shortcut icon" href="./assets/token-ledger.ico">
-    <link rel="stylesheet" href="./styles.css">
+    <link rel="stylesheet" href="./styles.css?v=2.4.1">
   </head>
   <body>
-    <div class="ambient-glow" aria-hidden="true"></div>
+    <!-- 1. 背景彩色粒子画布 (集成鼠标力场与彩色微节点 - 来自数字后花园) -->
+    <canvas id="ambient-particle-canvas"></canvas>
+
+    <!-- 2. 环境流动高光球 -->
+    <div class="glow-sphere" style="width: 550px; height: 550px; background: rgba(56, 189, 248, 0.14); top: 10px; left: 15%;"></div>
+    <div class="glow-sphere" style="width: 500px; height: 500px; background: rgba(236, 72, 153, 0.08); top: 140px; right: 10%;"></div>
 
     <div class="app-shell" id="appShell" data-view-state="loading" data-active-tab="overview">
-      <!-- Sticky Glass Topbar -->
-      <header class="topbar">
-        <div class="topbar-inner">
-          
-          <!-- Brand & Status -->
-          <a class="brand" href="#overview" aria-label="Token 账本总览">
-            <span class="brand-mark" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="4" width="18" height="16" rx="3"></rect>
-                <path d="M7 8h10M7 12h7M7 16h10"></path>
-              </svg>
-            </span>
-            <span class="brand-wordmark">
-              <span class="brand-name">Token 账本</span>
-              <span class="brand-badge">v2.3</span>
-            </span>
-            <div class="local-status" id="connectionStatus" role="status" aria-live="polite">
-              <span class="status-dot status-dot--loading" aria-hidden="true"></span>
-              <span id="connectionLabel">读取本机数据</span>
-            </div>
-          </a>
-
-          <!-- Center Tabs (Always Visible) -->
-          <nav class="segmented-control center-tabs" aria-label="主视图" role="tablist">
-            <button class="segmented-btn is-active" id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="overviewPanel" data-tab="overview">
-              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
-              <span>总览仪表盘 (趋势曲线)</span>
-            </button>
-            <button class="segmented-btn" id="tab-detail" type="button" role="tab" aria-selected="false" aria-controls="detailPanel" data-tab="detail" tabindex="-1">
-              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-              <span>智能体详情</span>
-            </button>
-            <button class="segmented-btn" id="tab-diagnostics" type="button" role="tab" aria-selected="false" aria-controls="diagnosticsPanel" data-tab="diagnostics" tabindex="-1">
-              <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>
-              <span>数据源与诊断</span>
-            </button>
-          </nav>
-
-          <!-- Right Action Controls -->
-          <div class="topbar-actions">
+      <!-- Floating Glass Topbar Dock (Sticky at Top) -->
+      <header class="topbar sticky-header">
+        <div class="topbar-inner site-container">
+          <div class="top-dock">
             
-            <!-- Time Range Segmented Control -->
-            <div class="segmented-control range-control" role="group" aria-label="观察范围">
-              <button class="segmented-btn" type="button" data-range="1">今天</button>
-              <button class="segmented-btn" type="button" data-range="7">7 天</button>
-              <button class="segmented-btn is-active" type="button" data-range="30">30 天</button>
-              <button class="segmented-btn" type="button" data-range="all">全部</button>
+            <!-- Brand Group (Digital Garden '账' Seed Logo) -->
+            <div class="brand-group" id="brandSeedHome" role="button" tabindex="0" aria-label="返回总览仪表盘">
+              <div class="brand-seed">账</div>
+              <div class="brand-names">
+                <div class="brand-title-wrap">
+                  <span class="brand-title">Token 账本</span>
+                  <span class="brand-tag-pill">v2.4</span>
+                </div>
+                <span class="brand-tag">PJY.NET.CN · 数字后花园</span>
+              </div>
             </div>
 
-            <!-- Scan Button -->
-            <button class="button button-primary" id="scanButton" type="button" disabled>
-              <span class="button-icon" id="scanIcon" aria-hidden="true">
-                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M10 3.2a6.8 6.8 0 1 0 6.1 3.8" stroke-linecap="round"></path>
-                  <path d="M12.7 3.2h3.8V7" stroke-linecap="round" stroke-linejoin="round"></path>
-                </svg>
-              </span>
-              <span id="scanButtonLabel">扫描本机</span>
-            </button>
+            <!-- Center Navigation Route Tabs (Digital Garden Style) -->
+            <nav class="nav-routes center-tabs" aria-label="主视图" role="tablist">
+              <button class="route-tab is-active" id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="overviewPanel" data-tab="overview">
+                <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                <span>总览仪表盘</span>
+              </button>
+              <button class="route-tab" id="tab-detail" type="button" role="tab" aria-selected="false" aria-controls="detailPanel" data-tab="detail" tabindex="-1">
+                <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                <span>智能体详情</span>
+              </button>
+              <button class="route-tab" id="tab-diagnostics" type="button" role="tab" aria-selected="false" aria-controls="diagnosticsPanel" data-tab="diagnostics" tabindex="-1">
+                <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/></svg>
+                <span>数据源与诊断</span>
+              </button>
+            </nav>
 
-            <!-- Theme Toggle Button -->
-            <button class="theme-toggle-btn" id="themeToggleBtn" type="button" title="切换暗色/亮色主题" aria-label="切换暗色/亮色主题">
-              <!-- Dark Icon (Moon) -->
-              <svg class="theme-icon theme-icon--moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path>
-              </svg>
-              <!-- Light Icon (Sun) -->
-              <svg class="theme-icon theme-icon--sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="4"></circle>
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
-              </svg>
-            </button>
+            <!-- Right Action Controls (Sticky Filter & Range & Scan & Theme) -->
+            <div class="dock-controls topbar-actions">
+              
+              <!-- Sticky Agent Filter Capsule (At the very top!) -->
+              <div class="segmented-control agent-control" id="agentPills" role="radiogroup" aria-label="筛选智能体">
+                <button class="segmented-btn agent-pill-btn is-active" type="button" data-agent-filter="all">
+                  <span class="agent-dot" style="background:#3B82F6"></span>
+                  <span>全部</span>
+                  <span class="agent-pill-count" id="agentCountAll">(3)</span>
+                </button>
+                <button class="segmented-btn agent-pill-btn" type="button" data-agent-filter="codex">
+                  <span class="agent-dot" style="background:#3B82F6"></span>
+                  <span>Codex</span>
+                </button>
+                <button class="segmented-btn agent-pill-btn" type="button" data-agent-filter="claude">
+                  <span class="agent-dot" style="background:#F97316"></span>
+                  <span>Claude</span>
+                </button>
+                <button class="segmented-btn agent-pill-btn" type="button" data-agent-filter="antigravity">
+                  <span class="agent-dot" style="background:#8B5CF6"></span>
+                  <span>Antigravity</span>
+                </button>
+              </div>
+
+              <!-- Time Range Selector Capsule -->
+              <div class="segmented-control range-control" role="group" aria-label="观察范围">
+                <button class="segmented-btn" type="button" data-range="1">今天</button>
+                <button class="segmented-btn" type="button" data-range="7">7天</button>
+                <button class="segmented-btn is-active" type="button" data-range="30">30天</button>
+                <button class="segmented-btn" type="button" data-range="all">全部</button>
+              </div>
+
+              <!-- Scan Button Capsule -->
+              <button class="button button-primary scan-btn-dock" id="scanButton" type="button" disabled>
+                <span class="button-icon" id="scanIcon" aria-hidden="true">
+                  <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M10 3.2a6.8 6.8 0 1 0 6.1 3.8" stroke-linecap="round"></path>
+                    <path d="M12.7 3.2h3.8V7" stroke-linecap="round" stroke-linejoin="round"></path>
+                  </svg>
+                </span>
+                <span id="scanButtonLabel">扫描</span>
+              </button>
+
+              <!-- Theme Toggle Button -->
+              <button class="theme-btn" id="themeToggleBtn" type="button" title="切换暗色/亮色主题" aria-label="切换暗色/亮色主题">
+                <span id="themeToggleIcon">🌙</span>
+              </button>
+
+            </div>
 
           </div>
         </div>
       </header>
 
       <!-- Main Workspace -->
-      <main class="workspace" id="mainContent" aria-busy="true">
+      <main class="workspace site-container" id="mainContent" aria-busy="true">
         
         <!-- Notices / Banners -->
         <div class="notice-stack" aria-live="polite">
@@ -138,33 +153,15 @@
 
         <!-- Tab 1: Overview Panel -->
         <section class="tab-panel is-active" id="overviewPanel" role="tabpanel" aria-labelledby="tab-overview" data-panel="overview">
-          <!-- Interactive Sub-header & Agent Filter Pills -->
-          <div class="filter-header-bar" id="filterHeaderBar">
-            <div class="filter-header-left">
-              <span class="range-indicator-dot" id="rangeIndicatorDot"></span>
-              <span id="currentRangeLabel" class="range-label">用量观察窗口 · 最近 30 天连续统计</span>
-            </div>
-
-            <!-- Agent Filter Pill Group (Direct Clickable) -->
-            <div class="agent-pill-group" id="agentPills" role="radiogroup" aria-label="筛选智能体">
-              <span class="pill-group-label">筛选智能体:</span>
-              <button class="agent-pill-btn is-active" type="button" data-agent-filter="all">
-                <span class="agent-dot" style="background:#3B82F6"></span>
-                <span>全部</span>
-                <span class="agent-pill-count" id="agentCountAll">(3)</span>
-              </button>
-              <button class="agent-pill-btn" type="button" data-agent-filter="codex">
-                <span class="agent-dot" style="background:#3B82F6"></span>
-                <span>Codex</span>
-              </button>
-              <button class="agent-pill-btn" type="button" data-agent-filter="claude">
-                <span class="agent-dot" style="background:#F97316"></span>
-                <span>Claude Code</span>
-              </button>
-              <button class="agent-pill-btn" type="button" data-agent-filter="antigravity">
-                <span class="agent-dot" style="background:#8B5CF6"></span>
-                <span>Antigravity</span>
-              </button>
+          <!-- Unified Header Hero (Strict Alignment) -->
+          <div class="panel-header-hero" id="filterHeaderBar">
+            <div class="panel-header-left">
+              <div class="hero-status-tag">
+                <span class="pulse-indicator" id="rangeIndicatorDot"></span>
+                <span id="currentRangeLabel">用量观察窗口 · 最近 30 天连续统计 · 全量智能体</span>
+              </div>
+              <h1 class="panel-hero-title">用量总览仪表盘</h1>
+              <p class="panel-hero-desc">聚合 Codex、Claude Code 与 Antigravity 本机日志，核算净用量、缓存收益与等额商业价值</p>
             </div>
           </div>
 
@@ -173,22 +170,71 @@
 
         <!-- Tab 2: Detail Panel -->
         <section class="tab-panel" id="detailPanel" role="tabpanel" aria-labelledby="tab-detail" data-panel="detail" hidden>
+          <!-- Unified Header Hero (Strict Alignment) -->
+          <div class="panel-header-hero">
+            <div class="panel-header-left">
+              <div class="hero-tag-pill">
+                <span class="pulse-indicator" style="background:#8B5CF6;box-shadow:0 0 0 3px rgba(139,92,246,0.25)"></span>
+                <span>三端矩阵 // 深度解析与审计</span>
+              </div>
+              <h1 class="panel-hero-title">智能体分类全景看板</h1>
+              <p class="panel-hero-desc">全景审计 Codex 会话链路、Claude 多路由分流以及 Antigravity 原生 Agentic 运行架构</p>
+            </div>
+
+            <!-- Detail Quick Nav Anchor Pills -->
+            <div class="agent-pill-group" role="group" aria-label="快速定位智能体">
+              <button class="agent-pill-btn" type="button" id="btnJumpCodex">
+                <span class="agent-dot" style="background:#3B82F6"></span>
+                <span>Codex 全景</span>
+              </button>
+              <button class="agent-pill-btn" type="button" id="btnJumpClaude">
+                <span class="agent-dot" style="background:#F97316"></span>
+                <span>Claude & CC Switch</span>
+              </button>
+              <button class="agent-pill-btn" type="button" id="btnJumpAntigravity">
+                <span class="agent-dot" style="background:#8B5CF6"></span>
+                <span>Antigravity DeepMind</span>
+              </button>
+            </div>
+          </div>
+
           <div id="detailContent"></div>
         </section>
 
         <!-- Tab 3: Diagnostics Panel -->
         <section class="tab-panel" id="diagnosticsPanel" role="tabpanel" aria-labelledby="tab-diagnostics" data-panel="diagnostics" hidden>
+          <!-- Unified Header Hero (Strict Alignment) -->
+          <div class="panel-header-hero">
+            <div class="panel-header-left">
+              <div class="hero-tag-pill">
+                <span class="pulse-indicator" style="background:#10B981;box-shadow:0 0 0 3px rgba(16,185,129,0.25)"></span>
+                <span>100% 离线 // 纯本地优先存储</span>
+              </div>
+              <h1 class="panel-hero-title">数据源与系统诊断中心</h1>
+              <p class="panel-hero-desc">各 Agent 适配器状态检查、本地 SQLite 数据库健康度与隐私审计边界</p>
+            </div>
+            
+            <div class="agent-pill-group" role="group" aria-label="诊断操作">
+              <button class="button button-secondary" type="button" id="btnDiagnosticsRescan" style="border-radius:9999px;padding:6px 16px;">
+                <span>⚡ 重新检测数据源</span>
+              </button>
+            </div>
+          </div>
+
           <div id="diagnosticContent"></div>
         </section>
 
       </main>
 
       <!-- App Footer -->
-      <footer class="app-footer">
+      <footer class="app-footer site-container">
         <div class="footer-inner">
-          <span class="footer-brand">TOKEN LEDGER // 本机优先</span>
-          <span class="mono" id="footerStatus">就绪</span>
-          <span class="footer-right mono" id="toolbarMeta">纯本地 SQLite 索引 · 零云端上传</span>
+          <div class="footer-left">
+            <span class="footer-brand">TOKEN LEDGER</span>
+            <span class="footer-badge-sec">LOCAL FIRST ARCHITECTURE</span>
+          </div>
+          <span class="mono footer-status-text" id="footerStatus">就绪</span>
+          <span class="footer-right mono" id="toolbarMeta">纯本地 SQLite 索引 · 零云端上传 · 127.0.0.1 回环</span>
         </div>
       </footer>
     </div>
@@ -198,6 +244,6 @@
     <div class="sr-only" id="liveAnnouncer" aria-live="polite"></div>
 
     <!-- Local Offline App Logic -->
-    <script src="./app.js" defer></script>
+    <script src="./app.js?v=2.4.1" defer></script>
   </body>
 </html>

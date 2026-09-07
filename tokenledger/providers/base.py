@@ -9,8 +9,11 @@ from ..models import DiscoveredFile, ParsedFile, ProviderDescriptor, ProviderPro
 class ProviderAdapter(ABC):
     descriptor: ProviderDescriptor
 
-    def __init__(self, user_home: Path):
-        self.user_home = user_home
+    def __init__(self, user_home: Path | Any):
+        if hasattr(user_home, "user_home"):
+            self.user_home = Path(getattr(user_home, "user_home"))
+        else:
+            self.user_home = Path(user_home)
 
     def should_reparse(self, discovered: DiscoveredFile) -> bool:
         return False

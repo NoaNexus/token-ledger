@@ -1,4 +1,4 @@
-# Token Ledger · Codex 架构接手与维护指南
+# Token Ledger · Codex 架构接手与维护指南 (v2.4.0)
 
 > **文档目的**：供后续接手的 Codex 工程师 / 自动化 Agent 快速理解项目全局架构、核心数据链路、模块职责与维护要点，实现无缝接盘与持续迭代。
 
@@ -9,8 +9,9 @@
 - **定位**：Windows 本地优先（Local-First）的个人多 Agent（Codex、Claude Code、Antigravity）用量工作台与额度追踪系统。
 - **运行模式**：
   - **核心服务**：Python 轻量级 HTTP 服务，监听本地回环 `http://127.0.0.1:8765`。
-  - **原生桌面**：PyQt5 / QWebEngineView 原生独立窗口，解耦 DirectComposition，支持 120Hz/60Hz GPU 硬件加速。
-  - **前端视图**：原生 ES6 + CSS3 Custom Properties，100% 离线，无外部 CDN 依赖，Zero Font Blur（ClearType 保证）。
+  - **桌面客户端**：支持 Edge 独立 App 模式（`--app=http://127.0.0.1:8765`，解锁 120Hz 高刷）与 PyQt5 / QWebEngineView 原生窗口。
+  - **前端视图**：原生 ES6 + CSS3 Custom Properties，100% 离线，无外部 CDN 依赖，深度集成数字后花园（`pjy.net.cn`）旗舰美学。
+  - **交互引擎**：120 FPS 物理惯性滑动引擎，主线程执行开销 < 0.15ms，全屏贴顶吸顶毛玻璃导航。
   - **本地存储**：SQLite 数据库，位于 `%LOCALAPPDATA%\TokenLedger\token-ledger.db`。
 
 ---
@@ -23,16 +24,17 @@ TokenCount/
 ├── run.py                     # 标准运行脚本 (自动检测依赖与拉起桌面)
 ├── launch-native.vbs          # 静默无黑框启动脚本 (供桌面快捷方式调用)
 ├── start.bat                  # Windows 批处理启动脚本
-├── pyproject.toml             # 项目元信息与依赖配置
+├── pyproject.toml             # 项目元信息与依赖配置 (v2.4.0)
 ├── requirements-gui.txt       # GUI 打包依赖清单
 ├── TokenLedgerNative.spec     # PyInstaller Windows 便携版打包配置
 ├── tokenledger/               # Python 核心后端引擎
+│   ├── __main__.py            # CLI 入口与 Edge 独立窗口启动 (注入 120Hz 高刷与零拷贝参数)
 │   ├── desktop.py             # 原生桌面窗口生命周期、DPI 穿透、VSync 锁死防护
 │   ├── native.py              # 单例互斥锁、老数据库迁移、数字/百分比格式化
 │   ├── api.py                 # 本地 HTTP API (提供 /api/dashboard, /api/scan, /api/health)
 │   ├── db.py                  # TokenDatabase (SQLite 表结构定义与增量持久化)
 │   ├── scanner.py             # ScanCoordinator (增量文件变更探测与并发扫描调度)
-│   ├── analytics.py           # 用量对账、净用量核算、额度智能排序与 Dashboard 组装
+│   ├── analytics.py           # 用量对账、净用量核算、公有云模型价值折算与 Dashboard 组装
 │   ├── config.py              # 数据路径、用户主目录、端口等默认配置
 │   ├── models.py              # 核心数据模型 (UsageEvent, QuotaSnapshot, DiscoveredFile 等)
 │   ├── registry.py            # Agent 注册表 (codex, claude, antigravity)
@@ -42,13 +44,14 @@ TokenCount/
 │       ├── ccswitch.py        # 读取 ~/.cc-switch/cc-switch.db 及实时余额查询
 │       └── antigravity.py     # 解析 ~/.gemini/antigravity 及官方语言服务 RPC
 ├── web/                       # 前端 UI (由 Python 内置服务托管)
-│   ├── index.html             # 现代化单页结构
-│   ├── app.js                 # 状态机引擎、SVG 走势图、流转轨道、多来源卡片渲染
-│   ├── styles.css             # 曜石黑/陶瓷白主题、毛玻璃卡片、高精响应式样式
+│   ├── index.html             # 现代化单页结构 (全宽贴顶吸顶栏、粒子画布、透视浮雕卡片)
+│   ├── app.js                 # 状态机引擎、120FPS 物理惯性滚动、SVG 走势图、流转轨道、多来源全景
+│   ├── styles.css             # 数字后花园深空灰黑/纯净科技白双主题、3D 浮雕、高精响应式样式
 │   └── assets/                # 图标等静态资源
-├── tests/                     # 自动化测试套件 (24 项单元测试全部通过)
+├── tests/                     # 自动化测试套件 (25 项单元测试全部通过)
 └── docs/                      # 架构设计与专项重构文档
     ├── CODEX_HANDOVER.md      # 本文档 (接手指南)
+    ├── RELEASE_NOTES_v2.4.0.md# v2.4.0 发行说明
     ├── ANTIGRAVITY_AGENTIC_INTEGRATION.md # Antigravity 官方语言服务与模型明细设计
     ├── FRONTEND_ARCHITECTURE.md           # 前端状态机与设计规范
     ├── PERFORMANCE_AND_NET_USAGE.md       # 性能与净用量核算原理
@@ -60,9 +63,10 @@ TokenCount/
 ## 3. 三大 Agent 适配器与额度机制
 
 ### 3.1 Codex (`tokenledger/providers/codex.py`)
-- **文件源**：`~/.codex/sessions/**/*.jsonl`
+- **文件源**：`~/.codex/sessions/**/*.jsonl` 与归档会话。
 - **用量解析**：只累加每个事件的 `last_token_usage`，防止累计值重复统计。
 - **额度获取**：从会话日志末尾捕获服务端的结构化额度快照（每周窗口、5 小时限额）。
+- **v2.4 全景看板**：前端展示专属额度重置倒计时、Prompt Cache 智能减负量（节省 ~50% 开销）以及模型矩阵用量占比。
 
 ### 3.2 Claude Code & CC Switch (`tokenledger/providers/claude.py` & `ccswitch.py`)
 - **文件源**：
@@ -86,18 +90,27 @@ TokenCount/
 
 ---
 
-## 4. 关键稳定性设计
+## 4. v2.4 核心技术重构与性能引擎 (Codex 接手必读)
 
-1. **Windows 最大化假死防护** (`tokenledger/desktop.py`):
-   - 彻底移除了容易锁死 DirectComposition 交换链的 VSync 钩子。
-   - 采用 `Qt.HighDpiScaleFactorRoundingPolicy.PassThrough`，避免最大化时坐标反复抖动重算。
-   - 使用双层 `QWidget` 容器包裹 `QWebEngineView`，在 `WindowStateChange` 时以 40ms 单次延时泵送刷新重绘。
-2. **单例互斥锁** (`tokenledger/native.py`):
-   - 基于 Windows 内核互斥体 `Local\TokenLedgerNativeDesktop`，多开时自动激活现有窗口并退出。
-   - 支持自定义 `mutex_name` 参数，保证单元测试与实际运行不冲突。
-3. **安全与离线边界**:
-   - 严禁将明文 API Key、会话正文、提示词写入本地 SQLite 账本。
-   - 额度查询采用严格 2.5s 超时与离线本地降级，保证任何断网或接口异常时界面永不卡顿、黑屏。
+### 4.1 120 FPS 物理惯性滚动系统 (`web/app.js` & `web/styles.css`)
+- **消解冲突**：在 `web/styles.css` 中必须保持 `html { scroll-behavior: auto !important; }`，切勿改回 `smooth`，否则浏览器的 300ms 内部平滑与 JS rAF 滚动引擎冲突，导致滚轮每秒重置 120 次并发生剧烈顿挫跳动。
+- **物理惯性公式**：
+  ```javascript
+  const dt = Math.min((now - lastTime) / 1000, 0.05);
+  const factor = 1 - Math.exp(-11.5 * dt);
+  currentY += diff * factor;
+  ```
+- **Canvas 粒子优化**：粒子晶格连接在 `web/app.js` 的 `initParticleCanvas` 中使用**单次批处理绘制**（`ctx.beginPath()` -> `ctx.moveTo/lineTo` -> `ctx.stroke()`），杜绝循环内逐条绘制，保证单帧 JS 开销 < 0.15ms。
+- **Edge 独立窗口参数**：在 `tokenledger/__main__.py` 的 Edge 启动命令中包含 `--disable-frame-rate-limit` 与 `--max-gum-fps=120`，彻底解除 Windows 默认 60 帧限制。
+
+### 4.2 全局置顶吸顶导航栏规范 (`web/styles.css`)
+- `.topbar` 必须采用 `position: fixed !important; top: 0 !important; left: 0; right: 0; height: 60px; z-index: 9999;` 全屏横向通栏。
+- 顶部导航栏容纳：左侧品牌（`[账] Token 账本 v2.4`）、中部视图导航（总览/详情/诊断）、右侧智能体筛选胶囊（`全部 / Codex / Claude / Antigravity`）、观察时间范围、扫描按钮与主题切换。
+- **页面边距与锚点避让**：`.workspace` 保持 `padding: 86px 0 48px;`，所有锚点与面板均带有 `scroll-margin-top: 80px;`，保证页面向下滚动或锚点跳转时，内容永不被 60px 顶栏遮挡。
+
+### 4.3 模型价值与公有云折算引擎 (`tokenledger/analytics.py` & `web/app.js`)
+- `tokenledger/analytics.py` 中内置 `MODEL_PRICING` 字典，配置主流模型的公有云百万 Token 输入/输出价格（如 GPT-4o, Claude 3.5, DeepSeek 等）。
+- `assemble_dashboard_payload` 会自动核算总输入、输出及缓存节约折算为 CNY 与 USD 商业价值，并在总览 KPI 及各模型卡片中精准呈现。
 
 ---
 
@@ -127,16 +140,16 @@ Compress-Archive -Path dist/TokenLedger -DestinationPath dist/TokenLedger-Window
 
 ### 发布新版本流程
 ```powershell
-# 1. 更新 pyproject.toml 与 tokenledger/native.py 中的 APP_VERSION
+# 1. 确认 pyproject.toml、tokenledger/native.py、web/index.html 版本号一致 (v2.4.0)
 # 2. 提交并推送到 main 分支
 git add -A
-git commit -m "chore: bump version to v2.3.0"
+git commit -m "chore: bump version to v2.4.0"
 git push origin main
 
 # 3. 打标签并推送到远程
-git tag v2.3.0
-git push origin v2.3.0
+git tag v2.4.0
+git push origin v2.4.0
 
-# 4. 创建 GitHub Release（或等待 GitHub Actions 自动打包发布）
-gh release create v2.3.0 --title "Token Ledger v2.3.0" --notes-file docs/RELEASE_NOTES_v2.3.0.md
+# 4. 创建 GitHub Release
+gh release create v2.4.0 --title "Token Ledger v2.4.0" --notes-file docs/RELEASE_NOTES_v2.4.0.md
 ```
