@@ -255,6 +255,7 @@ class AntigravityAdapter(ProviderAdapter):
                     used_percent=13.2,
                     window_minutes=10080,
                     resets_at="2026-09-11T00:14:22Z",
+                    updated_at=now_iso,
                     message="您已使用了部分每周限额，它将在 4 天 11 小时后完全刷新",
                 ),
                 QuotaSnapshot(
@@ -266,6 +267,7 @@ class AntigravityAdapter(ProviderAdapter):
                     used_percent=25.6,
                     window_minutes=300,
                     resets_at="2026-09-06T15:39:27Z",
+                    updated_at=now_iso,
                     message="您已使用了部分 5 小时限额，它将在 3 小时 17 分钟后完全刷新",
                 ),
                 QuotaSnapshot(
@@ -277,6 +279,7 @@ class AntigravityAdapter(ProviderAdapter):
                     used_percent=0.0,
                     window_minutes=10080,
                     resets_at="2026-09-13T12:21:37Z",
+                    updated_at=now_iso,
                     message="Claude 和 GPT 模型共享每周限额",
                 ),
                 QuotaSnapshot(
@@ -288,6 +291,7 @@ class AntigravityAdapter(ProviderAdapter):
                     used_percent=0.0,
                     window_minutes=300,
                     resets_at="2026-09-06T17:21:37Z",
+                    updated_at=now_iso,
                     message="Claude 和 GPT 模型共享 5 小时限额",
                 ),
             ]

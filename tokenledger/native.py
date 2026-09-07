@@ -10,7 +10,7 @@ from .config import default_data_dir
 
 
 APP_NAME = "Token 账本"
-APP_VERSION = "2.4.0"
+APP_VERSION = "2.4.2"
 _INSTANCE_HANDLE: int | None = None
 
 
@@ -81,6 +81,7 @@ def activate_existing_window(window_title: str = "Token 账本 - 本机用量工
             hwnd = found_hwnd
 
         if hwnd:
+            apply_dark_titlebar(hwnd)
             SW_RESTORE = 9
             user32.ShowWindow(hwnd, SW_RESTORE)
             user32.SetForegroundWindow(hwnd)
@@ -88,6 +89,109 @@ def activate_existing_window(window_title: str = "Token 账本 - 本机用量工
     except Exception:
         pass
     return False
+
+
+def apply_dark_titlebar(hwnd: int) -> bool:
+    """Apply immersive dark mode to Windows title bar and window frame via DWM."""
+    if sys.platform != "win32" or not hwnd:
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        dwmapi = ctypes.windll.dwmapi
+        DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19
+        val = wintypes.BOOL(True)
+        res = dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE,
+            ctypes.byref(val),
+            ctypes.sizeof(val),
+        )
+        if res != 0:
+            dwmapi.DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1,
+                ctypes.byref(val),
+                ctypes.sizeof(val),
+            )
+
+        # Windows 11 Build 22000+: set title bar background to dark (#090C10 -> 0x00100C09)
+        caption_color = wintypes.DWORD(0x00100C09)
+        dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            35,  # DWMWA_CAPTION_COLOR
+            ctypes.byref(caption_color),
+            ctypes.sizeof(caption_color),
+        )
+        # Set title text to light (#EDEDED -> 0x00EDEDED)
+        text_color = wintypes.DWORD(0x00EDEDED)
+        dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            36,  # DWMWA_TEXT_COLOR
+            ctypes.byref(text_color),
+            ctypes.sizeof(text_color),
+        )
+        # Set border color to match dark frame (#090C10 -> 0x00100C09)
+        border_color = wintypes.DWORD(0x00100C09)
+        dwmapi.DwmSetWindowAttribute(
+            hwnd,
+            34,  # DWMWA_BORDER_COLOR
+            ctypes.byref(border_color),
+            ctypes.sizeof(border_color),
+        )
+        return True
+    except Exception:
+        return False
+
+
+def darken_app_window_async(window_keyword: str = "Token 账本") -> None:
+    """Find the launched app window in a background daemon thread and apply dark titlebar."""
+    if sys.platform != "win32":
+        return
+
+    import threading
+    import time
+
+    def worker() -> None:
+        try:
+            import ctypes
+
+            user32 = ctypes.windll.user32
+            EnumWindows = user32.EnumWindows
+            EnumWindowsProc = ctypes.WINFUNCTYPE(
+                ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int)
+            )
+            GetWindowTextLengthW = user32.GetWindowTextLengthW
+            GetWindowTextW = user32.GetWindowTextW
+            IsWindowVisible = user32.IsWindowVisible
+
+            for _ in range(12):  # poll for up to ~3.6s
+                time.sleep(0.3)
+                found = None
+
+                def foreach(h, l):
+                    nonlocal found
+                    if IsWindowVisible(h):
+                        length = GetWindowTextLengthW(h)
+                        if length > 0:
+                            buff = ctypes.create_unicode_buffer(length + 1)
+                            GetWindowTextW(h, buff, length + 1)
+                            if window_keyword in buff.value:
+                                found = h
+                                return False
+                    return True
+
+                EnumWindows(EnumWindowsProc(foreach), 0)
+                if found:
+                    apply_dark_titlebar(found)
+                    break
+        except Exception:
+            pass
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
 
 
 def compact_number(value: Any) -> str:

@@ -2,6 +2,36 @@ html {
   scroll-behavior: auto !important;
   overflow-y: scroll;
   overscroll-behavior-y: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) var(--bg-canvas);
+}
+html.light {
+  scrollbar-color: rgba(0, 0, 0, 0.22) var(--bg-canvas);
+}
+
+/* Sleek Dark Minimalist Scrollbar (Visual UI Unity) */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-canvas);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 9999px;
+  border: 1px solid var(--bg-canvas);
+  transition: background-color 0.2s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+html.light ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: var(--bg-canvas);
+}
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.35);
 }
 
 :root {
@@ -105,6 +135,39 @@ html.dark, [data-theme="dark"] {
 
 [hidden] {
   display: none !important;
+}
+
+/* Universal Focus & Selection Cleanup (Eliminate Ugly Yellow Outline Box) */
+button,
+input,
+select,
+[role="button"],
+[role="tab"],
+.segmented-btn,
+.route-tab,
+.button,
+.theme-btn,
+.brand-group {
+  outline: none !important;
+  -webkit-tap-highlight-color: transparent;
+}
+button:focus,
+button:focus-visible,
+.segmented-btn:focus,
+.segmented-btn:focus-visible,
+.route-tab:focus,
+.route-tab:focus-visible,
+.button:focus,
+.button:focus-visible,
+.theme-btn:focus,
+.theme-btn:focus-visible,
+.brand-group:focus,
+.brand-group:focus-visible,
+[tabindex]:focus,
+[tabindex]:focus-visible {
+  outline: none !important;
+  outline-color: transparent !important;
+  -webkit-focus-ring-color: transparent !important;
 }
 
 body {
@@ -314,6 +377,20 @@ html.dark .specular-glare, [data-theme="dark"] .specular-glare {
   place-items: center;
   box-shadow: 0 4px 14px rgba(99, 102, 241, 0.38);
   flex-shrink: 0;
+}
+.brand-logo-img {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(56, 189, 248, 0.3), 0 0 1px 1px rgba(255, 255, 255, 0.12);
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+}
+.brand-group:hover .brand-logo-img {
+  transform: scale(1.08) rotate(3deg);
+  box-shadow: 0 6px 20px rgba(56, 189, 248, 0.5), 0 0 1px 1px rgba(56, 189, 248, 0.6);
 }
 .brand-names {
   display: flex;

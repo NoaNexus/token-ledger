@@ -21,6 +21,7 @@ from .native import (
     APP_NAME,
     acquire_single_instance,
     activate_existing_window,
+    apply_dark_titlebar,
     migrate_legacy_database,
     release_single_instance,
 )
@@ -144,6 +145,12 @@ def run_desktop() -> int:
 
         app = QApplication(sys.argv)
         app.setApplicationName("Token 账本")
+        app.setStyleSheet("""
+            QMainWindow, QWidget {
+                background-color: #090C10;
+                color: #EDEDED;
+            }
+        """)
         icon_path = str(resource_root() / "assets" / "token-ledger.ico")
         icon = QIcon(icon_path)
         app.setWindowIcon(icon)
@@ -162,18 +169,47 @@ def run_desktop() -> int:
                 self.layout.setSpacing(0)
 
                 self.view = QWebEngineView(self.container)
+                from PyQt5.QtGui import QColor
+                self.view.page().setBackgroundColor(QColor("#090C10"))
                 self.view.setUrl(QUrl("http://127.0.0.1:8765/"))
                 self.layout.addWidget(self.view)
                 self.setCentralWidget(self.container)
+
+                # Force native HWND creation and apply dark titlebar
+                try:
+                    apply_dark_titlebar(int(self.winId()))
+                except Exception:
+                    pass
+
+            def showEvent(self, event):
+                super().showEvent(event)
+                try:
+                    hwnd = int(self.winId())
+                    apply_dark_titlebar(hwnd)
+                    QTimer.singleShot(60, lambda: apply_dark_titlebar(hwnd))
+                    QTimer.singleShot(250, lambda: apply_dark_titlebar(hwnd))
+                except Exception:
+                    pass
 
             def changeEvent(self, event):
                 super().changeEvent(event)
                 if event.type() == QEvent.WindowStateChange:
                     # Refresh view render pump on maximize/restore to prevent DirectComposition swapchain lockup
                     QTimer.singleShot(40, lambda: self.view.update())
+                    try:
+                        apply_dark_titlebar(int(self.winId()))
+                    except Exception:
+                        pass
 
         window = LedgerMainWindow()
         window.show()
+        try:
+            hwnd = int(window.winId())
+            apply_dark_titlebar(hwnd)
+            QTimer.singleShot(80, lambda: apply_dark_titlebar(hwnd))
+            QTimer.singleShot(300, lambda: apply_dark_titlebar(hwnd))
+        except Exception:
+            pass
 
         # Clean shutdown handler
         def cleanup():

@@ -595,10 +595,10 @@ function renderOverview(data) {
               <span>精确：${Number(lifetime.total || 0).toLocaleString("zh-CN")}</span>
               <span class="mono" style="color:#34D399;font-weight:600">${Number(lifetime.sessions || 0).toLocaleString("zh-CN")} 会话 · ${Number(lifetime.calls || 0).toLocaleString("zh-CN")} 请求</span>
             </div>
-            <div class="kpi-cost-badge" title="基于公有云当前 API 标准计费预估等额商用价值">
-              <span>等额商用价值:</span>
-              <strong style="color:var(--text-primary)">${data.summary.cost_cny_text || '¥0.00'}</strong>
-              <span style="opacity:0.8;font-weight:normal">(${data.summary.cost_usd_text || '$0.00'})</span>
+            <div class="kpi-cost-badge" title="全周期累计消耗按公有云标准定价预估的等额商用价值">
+              <span>全周期等额价值:</span>
+              <strong style="color:var(--text-primary)">${(lifetime && lifetime.cost_cny_text) || data.summary.cost_cny_text || '¥0.00'}</strong>
+              <span style="opacity:0.8;font-weight:normal">(${ (lifetime && lifetime.cost_usd_text) || data.summary.cost_usd_text || '$0.00' })</span>
             </div>
           </div>
           <div class="kpi-foot">
@@ -624,6 +624,11 @@ function renderOverview(data) {
             <div class="kpi-sub">
               <span>原始输入：${compactNumber(summary.input)}</span>
               <span style="color:#34D399;font-weight:600">缓存减负 ${formatPercent(ratioToPercent(summary.cache_hit_rate))}</span>
+            </div>
+            <div class="kpi-cost-badge" title="当前所选时间范围内的等额商用价值">
+              <span>区间等额价值:</span>
+              <strong style="color:var(--text-primary)">${data.summary.cost_cny_text || '¥0.00'}</strong>
+              <span style="opacity:0.8;font-weight:normal">(${data.summary.cost_usd_text || '$0.00'})</span>
             </div>
           </div>
           <div class="kpi-foot">

@@ -212,7 +212,18 @@ def test_estimate_token_cost_and_dashboard_pricing(tmp_path: Path) -> None:
     assert cost_deepseek["cost_cny"] == 3.00
     assert cost_deepseek["cost_cny_text"] == "¥3.00"
 
-    # Test dashboard integration with pricing fields
+    # Test Codex frontier models
+    cost_sol = analytics.estimate_token_cost("gpt-5.6-sol", 2_000_000, 1_000_000, 500_000)
+    # uncached 1M @ $2.50 + cached 1M @ $1.25 + output 0.5M @ $10.00 = 2.50 + 1.25 + 5.00 = $8.75
+    assert cost_sol["cost_usd"] == 8.75
+    assert cost_sol["cost_cny"] == round(8.75 * 7.20, 4)
+    assert "OpenAI 官方定价" in cost_sol["pricing_source"]
+
+    cost_luna = analytics.estimate_token_cost("gpt-5.6-luna", 1_000_000, 0, 1_000_000)
+    # 1M @ $1.25 + 1M @ $5.00 = $6.25
+    assert cost_luna["cost_usd"] == 6.25
+
+    # Test dashboard integration with pricing and lifetime cost fields
     database = TokenDatabase(tmp_path / "pricing_ledger.db")
     parsed = ParsedFile(
         events=[
@@ -242,6 +253,8 @@ def test_estimate_token_cost_and_dashboard_pricing(tmp_path: Path) -> None:
     assert "estimated_cost_cny" in dash["summary"]
     assert "estimated_cost_usd" in dash["summary"]
     assert "cost_cny_text" in dash["summary"]
+    assert "estimated_cost_cny" in dash["lifetime"]["summary"]
+    assert "cost_cny_text" in dash["lifetime"]["summary"]
     assert len(dash["models"]) == 1
     assert dash["models"][0]["cost_cny_text"] is not None
     assert dash["models"][0]["cost_usd_text"] is not None

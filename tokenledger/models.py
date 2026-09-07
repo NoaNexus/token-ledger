@@ -40,11 +40,11 @@ class QuotaSnapshot:
     agent: str
     label: str
     status: str
-    remaining_percent: float | None
-    used_percent: float | None
-    window_minutes: int | None
-    resets_at: str | None
-    updated_at: str
+    remaining_percent: float | None = None
+    used_percent: float | None = None
+    window_minutes: int | None = None
+    resets_at: str | None = None
+    updated_at: str = ""
     message: str = ""
 
 

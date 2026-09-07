@@ -30,13 +30,16 @@ def launch_desktop_window(url: str) -> None:
                         str(candidate),
                         f"--app={url}",
                         "--window-size=1360,880",
-                        "--enable-features=SmoothScrolling",
+                        "--force-dark-mode",
+                        "--enable-features=WebUIDarkMode,SmoothScrolling",
                         "--enable-gpu-rasterization",
                         "--enable-zero-copy",
                         "--ignore-gpu-blocklist",
                         "--disable-frame-rate-limit",
                         "--max-gum-fps=120",
                     ])
+                    from .native import darken_app_window_async
+                    darken_app_window_async()
                     return
                 except Exception:
                     pass
