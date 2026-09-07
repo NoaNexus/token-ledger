@@ -22,6 +22,7 @@ from .native import (
     acquire_single_instance,
     activate_existing_window,
     apply_dark_titlebar,
+    apply_window_theme,
     migrate_legacy_database,
     release_single_instance,
 )
@@ -158,6 +159,7 @@ def run_desktop() -> int:
         class LedgerMainWindow(QMainWindow):
             def __init__(self):
                 super().__init__()
+                self._is_dark = True
                 self.setWindowTitle("Token 账本 - 本机用量工作台")
                 self.setWindowIcon(icon)
                 self.resize(1440, 920)
@@ -175,9 +177,36 @@ def run_desktop() -> int:
                 self.layout.addWidget(self.view)
                 self.setCentralWidget(self.container)
 
-                # Force native HWND creation and apply dark titlebar
+                # Listen to document.title changes from web app to dynamically sync light/dark theme
+                def on_title_changed(title: str):
+                    if "[theme:light]" in title:
+                        self.set_theme(False)
+                        self.setWindowTitle("Token 账本 - 本机用量工作台")
+                    elif "[theme:dark]" in title:
+                        self.set_theme(True)
+                        self.setWindowTitle("Token 账本 - 本机用量工作台")
+
+                self.view.titleChanged.connect(on_title_changed)
+
+                # Force native HWND creation and apply initial theme
                 try:
-                    apply_dark_titlebar(int(self.winId()))
+                    self.set_theme(self._is_dark)
+                except Exception:
+                    pass
+
+            def set_theme(self, is_dark: bool) -> None:
+                self._is_dark = is_dark
+                bg_color = "#090C10" if is_dark else "#F8FAFC"
+                text_color = "#EDEDED" if is_dark else "#0F172A"
+                self.setStyleSheet(f"QMainWindow, QWidget {{ background-color: {bg_color}; color: {text_color}; }}")
+                try:
+                    from PyQt5.QtGui import QColor
+                    self.view.page().setBackgroundColor(QColor(bg_color))
+                except Exception:
+                    pass
+                try:
+                    hwnd = int(self.winId())
+                    apply_window_theme(hwnd, is_dark)
                 except Exception:
                     pass
 
@@ -185,9 +214,9 @@ def run_desktop() -> int:
                 super().showEvent(event)
                 try:
                     hwnd = int(self.winId())
-                    apply_dark_titlebar(hwnd)
-                    QTimer.singleShot(60, lambda: apply_dark_titlebar(hwnd))
-                    QTimer.singleShot(250, lambda: apply_dark_titlebar(hwnd))
+                    apply_window_theme(hwnd, self._is_dark)
+                    QTimer.singleShot(60, lambda: apply_window_theme(hwnd, self._is_dark))
+                    QTimer.singleShot(250, lambda: apply_window_theme(hwnd, self._is_dark))
                 except Exception:
                     pass
 
@@ -197,7 +226,7 @@ def run_desktop() -> int:
                     # Refresh view render pump on maximize/restore to prevent DirectComposition swapchain lockup
                     QTimer.singleShot(40, lambda: self.view.update())
                     try:
-                        apply_dark_titlebar(int(self.winId()))
+                        apply_window_theme(int(self.winId()), self._is_dark)
                     except Exception:
                         pass
 
@@ -205,9 +234,9 @@ def run_desktop() -> int:
         window.show()
         try:
             hwnd = int(window.winId())
-            apply_dark_titlebar(hwnd)
-            QTimer.singleShot(80, lambda: apply_dark_titlebar(hwnd))
-            QTimer.singleShot(300, lambda: apply_dark_titlebar(hwnd))
+            apply_window_theme(hwnd, window._is_dark)
+            QTimer.singleShot(80, lambda: apply_window_theme(hwnd, window._is_dark))
+            QTimer.singleShot(300, lambda: apply_window_theme(hwnd, window._is_dark))
         except Exception:
             pass
 

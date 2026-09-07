@@ -91,8 +91,8 @@ def activate_existing_window(window_title: str = "Token 账本 - 本机用量工
     return False
 
 
-def apply_dark_titlebar(hwnd: int) -> bool:
-    """Apply immersive dark mode to Windows title bar and window frame via DWM."""
+def apply_window_theme(hwnd: int, is_dark: bool = True) -> bool:
+    """Apply dynamic Windows native title bar and window frame theme (dark or light) via DWM."""
     if sys.platform != "win32" or not hwnd:
         return False
     try:
@@ -102,7 +102,7 @@ def apply_dark_titlebar(hwnd: int) -> bool:
         dwmapi = ctypes.windll.dwmapi
         DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19
-        val = wintypes.BOOL(True)
+        val = wintypes.BOOL(is_dark)
         res = dwmapi.DwmSetWindowAttribute(
             hwnd,
             DWMWA_USE_IMMERSIVE_DARK_MODE,
@@ -117,24 +117,29 @@ def apply_dark_titlebar(hwnd: int) -> bool:
                 ctypes.sizeof(val),
             )
 
-        # Windows 11 Build 22000+: set title bar background to dark (#090C10 -> 0x00100C09)
-        caption_color = wintypes.DWORD(0x00100C09)
+        # Windows 11 Build 22000+: set title bar background, text, and border colors
+        # Color format is COLORREF 0x00BBGGRR
+        if is_dark:
+            caption_color = wintypes.DWORD(0x00100C09)  # #090C10 (Dark deep canvas)
+            text_color = wintypes.DWORD(0x00EDEDED)     # #EDEDED (Light text)
+            border_color = wintypes.DWORD(0x00100C09)   # #090C10
+        else:
+            caption_color = wintypes.DWORD(0x00FCFAF8)  # #F8FAFC (Light clean canvas)
+            text_color = wintypes.DWORD(0x002A170F)     # #0F172A (Dark text)
+            border_color = wintypes.DWORD(0x00F0E8E2)   # #E2E8F0 (Subtle border)
+
         dwmapi.DwmSetWindowAttribute(
             hwnd,
             35,  # DWMWA_CAPTION_COLOR
             ctypes.byref(caption_color),
             ctypes.sizeof(caption_color),
         )
-        # Set title text to light (#EDEDED -> 0x00EDEDED)
-        text_color = wintypes.DWORD(0x00EDEDED)
         dwmapi.DwmSetWindowAttribute(
             hwnd,
             36,  # DWMWA_TEXT_COLOR
             ctypes.byref(text_color),
             ctypes.sizeof(text_color),
         )
-        # Set border color to match dark frame (#090C10 -> 0x00100C09)
-        border_color = wintypes.DWORD(0x00100C09)
         dwmapi.DwmSetWindowAttribute(
             hwnd,
             34,  # DWMWA_BORDER_COLOR
@@ -144,6 +149,11 @@ def apply_dark_titlebar(hwnd: int) -> bool:
         return True
     except Exception:
         return False
+
+
+def apply_dark_titlebar(hwnd: int) -> bool:
+    """Legacy compatibility helper: apply dark theme to titlebar."""
+    return apply_window_theme(hwnd, is_dark=True)
 
 
 def darken_app_window_async(window_keyword: str = "Token 账本") -> None:

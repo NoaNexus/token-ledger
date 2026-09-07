@@ -125,13 +125,30 @@ class TokenLedgerHandler(BaseHTTPRequestHandler):
         if self.headers.get("X-Token-Ledger-Request") != "same-origin":
             self._send_json({"error": "missing local request header"}, HTTPStatus.FORBIDDEN)
             return
-        if urlparse(self.path).path == "/api/scan":
+        parsed_path = urlparse(self.path).path
+        if parsed_path == "/api/scan":
             query = parse_qs(urlparse(self.path).query)
             accepted = self.server.scanner.start_background(force=query.get("force", ["0"])[0] == "1")
             self._send_json(
                 {"ok": accepted, "status": "scanning" if accepted else "already_scanning"},
                 HTTPStatus.ACCEPTED if accepted else HTTPStatus.CONFLICT,
             )
+            return
+        if parsed_path == "/api/theme":
+            query = parse_qs(urlparse(self.path).query)
+            theme = query.get("theme", ["dark"])[0]
+            is_dark = theme != "light"
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+                    from .native import apply_window_theme
+                    user32 = ctypes.windll.user32
+                    hwnd = user32.FindWindowW(None, "Token 账本 - 本机用量工作台")
+                    if hwnd:
+                        apply_window_theme(hwnd, is_dark)
+                except Exception:
+                    pass
+            self._send_json({"ok": True, "theme": "dark" if is_dark else "light"})
             return
         self._send_json({"error": "not found"}, HTTPStatus.NOT_FOUND)
 

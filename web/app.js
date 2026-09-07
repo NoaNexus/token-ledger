@@ -2398,19 +2398,32 @@ function startPolling() {
 }
 
 /* ==========================================================================
-   Theme Switcher (Persisted via localStorage)
+   Theme Switcher (Persisted via localStorage & Synced with Native Title Bar)
    ========================================================================== */
+function syncNativeTheme(isDark) {
+  const token = isDark ? "dark" : "light";
+  document.title = `Token 账本 - 本机用量工作台 [theme:${token}]`;
+  try {
+    fetch(`/api/theme?theme=${token}`, {
+      method: "POST",
+      headers: { "X-Token-Ledger-Request": "same-origin" },
+    }).catch(() => {});
+  } catch (e) {}
+}
+
 function setupTheme() {
   // Restore saved theme on startup
+  let isDark = true;
   try {
     const saved = localStorage.getItem("tokenledger-theme");
-    const isDark = saved !== "light";
+    isDark = saved !== "light";
     document.documentElement.classList.toggle("dark", isDark);
     document.documentElement.classList.toggle("light", !isDark);
     document.documentElement.setAttribute("data-theme", isDark ? "dark" : "light");
     const icon = $("#themeToggleIcon");
     if (icon) icon.textContent = isDark ? "☀️" : "🌙";
   } catch (e) {}
+  syncNativeTheme(isDark);
 
   if (!elements.themeToggle) return;
   elements.themeToggle.addEventListener("click", () => {
@@ -2424,6 +2437,7 @@ function setupTheme() {
     if (icon) icon.textContent = nextDark ? "☀️" : "🌙";
 
     try { localStorage.setItem("tokenledger-theme", nextDark ? "dark" : "light"); } catch (e) {}
+    syncNativeTheme(nextDark);
     toast(nextDark ? "已切换至暗色模式 (深空灰黑)" : "已切换至亮色模式 (纯净科技白)");
 
     if (state.data) {

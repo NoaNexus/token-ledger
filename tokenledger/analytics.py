@@ -254,17 +254,23 @@ PRICING_CATALOG: dict[str, dict[str, Any]] = {
     "gpt-5.5": {"input": 2.50, "cache": 1.25, "output": 10.00, "currency": "USD", "source": "OpenAI 官方定价 (GPT-5)"},
     "gpt-5": {"input": 2.50, "cache": 1.25, "output": 10.00, "currency": "USD", "source": "OpenAI 官方定价 (GPT-5)"},
     "gpt-6": {"input": 3.00, "cache": 1.50, "output": 12.00, "currency": "USD", "source": "OpenAI 官方定价 (GPT-6)"},
-    "gpt-4o": {"input": 2.50, "cache": 1.25, "output": 10.00, "currency": "USD", "source": "OpenAI 官方定价"},
     "gpt-4o-mini": {"input": 0.15, "cache": 0.075, "output": 0.60, "currency": "USD", "source": "OpenAI 官方定价"},
+    "gpt-4o": {"input": 2.50, "cache": 1.25, "output": 10.00, "currency": "USD", "source": "OpenAI 官方定价"},
+    "gpt-4-turbo": {"input": 10.00, "cache": 5.00, "output": 30.00, "currency": "USD", "source": "OpenAI 官方定价"},
+    "gpt-4": {"input": 30.00, "cache": 15.00, "output": 60.00, "currency": "USD", "source": "OpenAI 官方定价"},
+    "o1-mini": {"input": 3.00, "cache": 1.50, "output": 12.00, "currency": "USD", "source": "OpenAI 官方定价"},
+    "o1-preview": {"input": 15.00, "cache": 7.50, "output": 60.00, "currency": "USD", "source": "OpenAI 官方定价"},
     "o1": {"input": 15.00, "cache": 7.50, "output": 60.00, "currency": "USD", "source": "OpenAI 官方定价"},
     "o3-mini": {"input": 1.10, "cache": 0.55, "output": 4.40, "currency": "USD", "source": "OpenAI 官方定价"},
+    "chatgpt-4o-latest": {"input": 5.00, "cache": 2.50, "output": 15.00, "currency": "USD", "source": "OpenAI 官方定价"},
 
     # DeepSeek Family
+    "deepseek-reasoner": {"input": 4.00, "cache": 1.00, "output": 16.00, "currency": "CNY", "source": "DeepSeek 官方定价 (R1)"},
+    "deepseek-chat": {"input": 1.00, "cache": 0.10, "output": 2.00, "currency": "CNY", "source": "DeepSeek 官方定价 (V3)"},
     "deepseek-v4-pro": {"input": 2.00, "cache": 0.50, "output": 8.00, "currency": "CNY", "source": "DeepSeek 官方定价 (V4 Pro)"},
     "deepseek-v4-flash": {"input": 0.50, "cache": 0.10, "output": 1.00, "currency": "CNY", "source": "DeepSeek 官方定价 (V4 Flash)"},
     "deepseek-v4-flash-vision-exp": {"input": 0.50, "cache": 0.10, "output": 1.00, "currency": "CNY", "source": "DeepSeek 官方定价"},
-    "deepseek-chat": {"input": 1.00, "cache": 0.10, "output": 2.00, "currency": "CNY", "source": "DeepSeek 官方定价"},
-    "deepseek-reasoner": {"input": 4.00, "cache": 1.00, "output": 16.00, "currency": "CNY", "source": "DeepSeek 官方定价"},
+    "deepseek-coder": {"input": 1.00, "cache": 0.10, "output": 2.00, "currency": "CNY", "source": "DeepSeek 官方定价"},
 
     # Claude Family (Anthropic)
     "claude-3-7-sonnet": {"input": 3.00, "cache": 0.30, "output": 15.00, "currency": "USD", "source": "Anthropic 官方定价"},
@@ -273,6 +279,7 @@ PRICING_CATALOG: dict[str, dict[str, Any]] = {
     "claude-sonnet-5": {"input": 3.00, "cache": 0.30, "output": 15.00, "currency": "USD", "source": "Anthropic 官方定价"},
     "claude-3-5-haiku": {"input": 0.80, "cache": 0.08, "output": 4.00, "currency": "USD", "source": "Anthropic 官方定价"},
     "claude-haiku-4-5": {"input": 0.80, "cache": 0.08, "output": 4.00, "currency": "USD", "source": "Anthropic 官方定价"},
+    "claude-3-haiku": {"input": 0.25, "cache": 0.025, "output": 1.25, "currency": "USD", "source": "Anthropic 官方定价"},
     "claude-3-opus": {"input": 15.00, "cache": 1.50, "output": 75.00, "currency": "USD", "source": "Anthropic 官方定价"},
     "claude-opus-5": {"input": 15.00, "cache": 1.50, "output": 75.00, "currency": "USD", "source": "Anthropic 官方定价"},
 
@@ -282,6 +289,8 @@ PRICING_CATALOG: dict[str, dict[str, Any]] = {
     "gemini-3.7-flash-exp-b": {"input": 0.10, "cache": 0.025, "output": 0.40, "currency": "USD", "source": "Google 官方标准价"},
     "gemini-3.1-pro": {"input": 1.25, "cache": 0.31, "output": 5.00, "currency": "USD", "source": "Google 官方标准价"},
     "gemini-2.5-pro": {"input": 1.25, "cache": 0.31, "output": 5.00, "currency": "USD", "source": "Google 官方标准价"},
+    "gemini-2.0-flash": {"input": 0.10, "cache": 0.025, "output": 0.40, "currency": "USD", "source": "Google 官方标准价"},
+    "gemini-2.0-pro": {"input": 1.25, "cache": 0.31, "output": 5.00, "currency": "USD", "source": "Google 官方标准价"},
     "gemini-1.5-pro": {"input": 1.25, "cache": 0.31, "output": 5.00, "currency": "USD", "source": "Google 官方标准价"},
     "gemini-1.5-flash": {"input": 0.075, "cache": 0.018, "output": 0.30, "currency": "USD", "source": "Google 官方标准价"},
 
@@ -292,11 +301,15 @@ PRICING_CATALOG: dict[str, dict[str, Any]] = {
     "glm-4.5-air": {"input": 0.50, "cache": 0.10, "output": 0.50, "currency": "CNY", "source": "智谱开放平台"},
     "glm-4-plus": {"input": 10.00, "cache": 5.00, "output": 10.00, "currency": "CNY", "source": "智谱开放平台"},
     "glm-4-flash": {"input": 0.10, "cache": 0.05, "output": 0.10, "currency": "CNY", "source": "智谱开放平台"},
+    "qwen-max": {"input": 16.00, "cache": 4.00, "output": 40.00, "currency": "CNY", "source": "阿里云百炼 (Qwen Max)"},
     "qwen3.7-plus": {"input": 0.80, "cache": 0.20, "output": 2.00, "currency": "CNY", "source": "阿里云百炼 (Qwen Plus)"},
+    "qwen-plus": {"input": 0.80, "cache": 0.20, "output": 2.00, "currency": "CNY", "source": "阿里云百炼 (Qwen Plus)"},
+    "qwen-turbo": {"input": 0.30, "cache": 0.10, "output": 0.60, "currency": "CNY", "source": "阿里云百炼 (Qwen Turbo)"},
     "qwen3.5-flash": {"input": 0.10, "cache": 0.05, "output": 0.20, "currency": "CNY", "source": "阿里云百炼 (Qwen Flash)"},
-    "qwen-plus": {"input": 0.80, "cache": 0.20, "output": 2.00, "currency": "CNY", "source": "阿里云百炼"},
-    "qwen-turbo": {"input": 0.30, "cache": 0.10, "output": 0.60, "currency": "CNY", "source": "阿里云百炼"},
-    "qwen-max": {"input": 16.00, "cache": 4.00, "output": 40.00, "currency": "CNY", "source": "阿里云百炼"},
+    "moonshot-v1-8k": {"input": 12.00, "cache": 3.00, "output": 12.00, "currency": "CNY", "source": "Moonshot 开放平台"},
+    "doubao-pro": {"input": 0.80, "cache": 0.16, "output": 2.00, "currency": "CNY", "source": "火山引擎 (豆包 Pro)"},
+    "doubao-lite": {"input": 0.30, "cache": 0.06, "output": 0.60, "currency": "CNY", "source": "火山引擎 (豆包 Lite)"},
+    "minimax-abab6.5s": {"input": 1.00, "cache": 0.20, "output": 1.00, "currency": "CNY", "source": "MiniMax 开放平台"},
 }
 
 
@@ -311,13 +324,26 @@ def estimate_token_cost(
     target_key = None
     m_lower = (model_name or "").lower().strip()
 
-    for key in PRICING_CATALOG:
+    # Exact or prefix match against catalog (sorted by key length descending to prioritize more specific keys)
+    for key in sorted(PRICING_CATALOG.keys(), key=len, reverse=True):
         if key == m_lower or m_lower.startswith(key):
             target_key = key
             break
 
     if not target_key:
-        if "sol" in m_lower or "gpt-5" in m_lower or "gpt-6" in m_lower:
+        if "o1-mini" in m_lower:
+            target_key = "o1-mini"
+        elif "o1" in m_lower:
+            target_key = "o1"
+        elif "o3" in m_lower:
+            target_key = "o3-mini"
+        elif "gpt-4o-mini" in m_lower:
+            target_key = "gpt-4o-mini"
+        elif "gpt-4-turbo" in m_lower:
+            target_key = "gpt-4-turbo"
+        elif "gpt-4" in m_lower:
+            target_key = "gpt-4o"
+        elif "sol" in m_lower or "gpt-5" in m_lower or "gpt-6" in m_lower:
             target_key = "gpt-5.6-sol"
         elif "luna" in m_lower:
             target_key = "gpt-5.6-luna"
@@ -326,31 +352,61 @@ def estimate_token_cost(
         elif "codex" in m_lower:
             target_key = "codex-auto-review"
         elif "deepseek" in m_lower:
-            target_key = "deepseek-v4-pro" if ("pro" in m_lower or "r1" in m_lower or "reason" in m_lower) else "deepseek-v4-flash"
-        elif "glm" in m_lower:
-            target_key = "glm-5.3-flash" if "flash" in m_lower else "glm-4-plus"
-        elif "qwen" in m_lower:
-            target_key = "qwen3.7-plus" if "plus" in m_lower else ("qwen-max" if "max" in m_lower else "qwen3.5-flash")
-        elif "sonnet" in m_lower or "claude-3-7" in m_lower or "claude-3-5" in m_lower:
+            if "r1" in m_lower or "reason" in m_lower:
+                target_key = "deepseek-reasoner"
+            elif "pro" in m_lower:
+                target_key = "deepseek-v4-pro"
+            elif "flash" in m_lower:
+                target_key = "deepseek-v4-flash"
+            else:
+                target_key = "deepseek-chat"
+        elif "claude" in m_lower or "anthropic" in m_lower:
+            if "opus" in m_lower:
+                target_key = "claude-3-opus"
+            elif "haiku" in m_lower:
+                target_key = "claude-3-5-haiku"
+            else:
+                target_key = "claude-3-7-sonnet"
+        elif "sonnet" in m_lower:
             target_key = "claude-3-7-sonnet"
         elif "haiku" in m_lower:
             target_key = "claude-3-5-haiku"
         elif "opus" in m_lower:
             target_key = "claude-3-opus"
+        elif "gemini" in m_lower:
+            target_key = "gemini-3.1-pro" if "pro" in m_lower else "gemini-3.8-flash"
+        elif "glm" in m_lower or "chatglm" in m_lower:
+            if "flash" in m_lower:
+                target_key = "glm-5.3-flash"
+            elif "air" in m_lower:
+                target_key = "glm-4.5-air"
+            else:
+                target_key = "glm-4-plus"
+        elif "qwen" in m_lower or "tongyi" in m_lower:
+            if "max" in m_lower:
+                target_key = "qwen-max"
+            elif "plus" in m_lower:
+                target_key = "qwen3.7-plus"
+            elif "flash" in m_lower:
+                target_key = "qwen3.5-flash"
+            else:
+                target_key = "qwen-turbo"
+        elif "moonshot" in m_lower or "kimi" in m_lower:
+            target_key = "moonshot-v1-8k"
+        elif "doubao" in m_lower:
+            target_key = "doubao-lite" if "lite" in m_lower else "doubao-pro"
+        elif "minimax" in m_lower or "abab" in m_lower:
+            target_key = "minimax-abab6.5s"
         elif "flash" in m_lower:
             target_key = "gemini-3.7-flash"
         elif "pro" in m_lower:
             target_key = "gemini-3.1-pro"
-        elif "gpt-4" in m_lower:
-            target_key = "gpt-4o"
-        elif "o1" in m_lower:
-            target_key = "o1"
-        elif "o3" in m_lower:
-            target_key = "o3-mini"
         elif agent == "codex":
             target_key = "gpt-5.6-sol"
         elif agent == "claude":
             target_key = "deepseek-v4-pro"
+        elif agent == "antigravity":
+            target_key = "gemini-3.8-flash"
         else:
             target_key = "gemini-3.8-flash"
 

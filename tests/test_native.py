@@ -61,3 +61,10 @@ def test_activate_existing_window_nonexistent() -> None:
     # Activating an imaginary window title should return False safely without error
     assert native.activate_existing_window("NonExistentWindow_XYZ_12345") is False
 
+
+def test_apply_window_theme_dark_and_light() -> None:
+    # Testing with 0 or non-existent HWND returns False without crashing
+    assert native.apply_window_theme(0, is_dark=True) is False
+    assert native.apply_window_theme(0, is_dark=False) is False
+    assert native.apply_dark_titlebar(0) is False
+
