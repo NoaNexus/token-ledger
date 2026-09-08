@@ -488,6 +488,28 @@ def main() -> int:
             wait_ms(1500)
             if not view.grab().save(str(args.artifact_dir / 'qt-web-panel-light.png'), 'PNG'):
                 raise OSError('Failed to save light panel hover screenshot')
+            pill = json.loads(evaluate(page, """JSON.stringify((() => {
+                const b = document.querySelector('.agent-pill-btn');
+                return {radius:parseFloat(getComputedStyle(b).borderTopLeftRadius), height:b.offsetHeight};
+            })())""", timeout_ms))
+            if pill['radius'] < pill['height'] / 2:
+                raise AssertionError(f'Filter must be capsule shaped: {pill!r}')
+            for tab in ('detail', 'diagnostics'):
+                evaluate(page, f"document.getElementById('tab-{tab}').click(); window.scrollTo(0,0)", timeout_ms)
+                for width in (1440, 900, 480):
+                    view.resize(width, 1000)
+                    wait_ms(650)
+                    spacing = json.loads(evaluate(page, """JSON.stringify((() => {
+                        const panel = document.querySelector('.tab-panel:not([hidden])');
+                        const stack = panel.querySelector('.detail-stack,.diag-stack');
+                        const children = [...stack.children].filter(c => c.getBoundingClientRect().height > 0);
+                        const gaps = children.slice(1).map((c,i) => c.getBoundingClientRect().top-children[i].getBoundingClientRect().bottom);
+                        return {gaps, overflow:document.documentElement.scrollWidth > window.innerWidth};
+                    })())""", timeout_ms))
+                    if spacing['overflow'] or any(gap < 24 for gap in spacing['gaps']):
+                        raise AssertionError(f'{tab} spacing at {width}: {spacing!r}')
+                    if not view.grab().save(str(args.artifact_dir / f'qt-web-{tab}-{width}.png'), 'PNG'):
+                        raise OSError(f'Failed to save {tab} layout')
             print(
                 json.dumps(
                     {
