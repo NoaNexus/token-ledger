@@ -207,17 +207,35 @@ html.light .ambient-glow {
    3D 浮雕与镜面高光反射 (来自数字后花园旗舰设计)
    ========================================================================== */
 .tilt-wrapper {
-  perspective: 1000px;
+  perspective: none;
 }
 .tilt-card, .glass-card {
   position: relative;
   border-radius: 20px;
-  /* Return to a flat surface at rest; only the hovered card is transformed. */
+  /* Text stays outside the transformed decorative surface at all times. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   transform: none;
-  transition: transform 0.18s ease-out, border-color 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease;
+  isolation: isolate;
+  transition: border-color 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease;
+}
+.tilt-surface {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  bottom: -1px;
+  left: -1px;
+  z-index: -1;
+  pointer-events: none;
+  border: 1px solid var(--border-subtle);
+  border-radius: inherit;
+  background: inherit;
+  transition: transform 0.18s ease-out, box-shadow 0.25s ease;
+}
+.tilt-card.is-tilting > .tilt-surface {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-hover);
 }
 .tilt-card:hover, .glass-card:hover {
   box-shadow: var(--shadow-hover);
@@ -237,7 +255,7 @@ html.light .ambient-glow {
   transition: opacity 0.3s;
 }
 .tilt-card:hover .specular-glare, .glass-card:hover .specular-glare,
-.tilt-card.is-tilting > .specular-glare {
+.tilt-card.is-tilting > .tilt-surface > .specular-glare {
   opacity: 1;
 }
 html.dark .specular-glare, [data-theme="dark"] .specular-glare {
@@ -1001,25 +1019,25 @@ html.light .theme-icon--moon { display: none; }
    Overview Layout: 4 KPI Cards Grid
    ========================================================================== */
 .overview-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
 }
 
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(1, minmax(0, 1fr));
-  gap: 16px;
+  gap: 20px;
 }
 @media (min-width: 640px) {
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
-@media (min-width: 1024px) {
+@media (min-width: 1280px) {
   .kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
 .kpi-card {
-  padding: 20px;
+  padding: 24px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -1028,15 +1046,23 @@ html.light .theme-icon--moon { display: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
 }
+.kpi-head > * { margin-bottom: 6px; }
+.kpi-head > :first-child { margin-right: 10px; }
+.kpi-label > * + * { margin-left: 6px; }
+.kpi-dot { margin-right: 6px; }
+.kpi-label { gap: 0; }
+.kpi-quota-value { display: flex; align-items: baseline; flex-wrap: wrap; }
+.kpi-quota-value > * + * { margin-left: 10px; }
 .kpi-label {
   font-size: 12px;
   font-weight: 600;
   color: var(--text-secondary);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 0;
 }
 .kpi-dot {
   width: 7px;
@@ -1053,21 +1079,27 @@ html.light .theme-icon--moon { display: none; }
 .kpi-sub {
   font-size: 12px;
   color: var(--text-tertiary);
-  margin-top: 4px;
-  display: flex;
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
   align-items: center;
   justify-content: space-between;
 }
 .kpi-foot {
-  margin-top: 14px;
-  padding-top: 10px;
+  margin-top: 20px;
+  padding-top: 14px;
   border-top: 1px solid var(--border-subtle);
   font-size: 11px;
   color: var(--text-tertiary);
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
 }
+.kpi-foot > :first-child { margin-right: 10px; }
+.flow-title-group h2 { gap: 0; flex-wrap: wrap; }
+.flow-title-group h2 > * + * { margin-left: 10px; }
 
 /* ==========================================================================
    Token Flow Pipeline
@@ -1089,7 +1121,7 @@ html.light .theme-icon--moon { display: none; }
   color: var(--text-primary);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 0;
 }
 .flow-title-group p {
   font-size: 12px;
@@ -2034,10 +2066,11 @@ html.light .model-cost-tag {
   font-weight: normal;
 }
 .kpi-cost-badge {
-  display: inline-flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
   gap: 5px;
-  padding: 3px 8px;
+  padding: 9px 10px;
   border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
@@ -2045,8 +2078,10 @@ html.light .model-cost-tag {
   background: rgba(56, 189, 248, 0.12);
   color: #38bdf8;
   border: 1px solid rgba(56, 189, 248, 0.25);
-  margin-top: 6px;
-  width: fit-content;
+  margin-top: 12px;
+  width: 100%;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
 }
 html.light .kpi-cost-badge {
   background: rgba(37, 99, 235, 0.08);
@@ -2331,7 +2366,7 @@ html.light .kpi-cost-badge {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tilt-card {
+  .tilt-card, .tilt-surface {
     transform: none !important;
   }
   .specular-glare {

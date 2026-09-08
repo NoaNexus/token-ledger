@@ -649,7 +649,7 @@ function renderOverview(data) {
             <span class="pill-badge ${isHealthy ? 'pill-badge--emerald' : 'pill-badge--amber'}">${escapeHtml(quota?.label || "额度窗口")}</span>
           </div>
           <div>
-            <div style="display:flex;align-items:baseline;gap:8px">
+            <div class="kpi-quota-value">
               <span class="kpi-value mono" style="color:${isHealthy ? '#34D399' : '#FBBF24'}">${escapeHtml(quotaValDisplay)}</span>
               <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${quota?.status === 'stale' ? '旧快照' : (quotaAvailable ? (quotaPercent == null ? '余额快照' : '服务端快照') : '额度未知')}</span>
             </div>
@@ -2472,10 +2472,15 @@ function setupTiltCards() {
     card._hasTiltAttached = true;
     card.classList.add("tilt-card");
 
-    if (!card.querySelector(".specular-glare")) {
+    let surface = card.querySelector(':scope > .tilt-surface');
+    if (!surface) {
+      surface = document.createElement('div');
+      surface.className = 'tilt-surface';
+      surface.setAttribute('aria-hidden', 'true');
       const glare = document.createElement("div");
       glare.className = "specular-glare";
-      card.prepend(glare);
+      surface.append(glare);
+      card.prepend(surface);
     }
 
     let rafId = null;
@@ -2488,7 +2493,7 @@ function setupTiltCards() {
       rafId = null;
       rect = null;
       card.classList.remove("is-tilting");
-      card.style.removeProperty("transform");
+      surface.style.removeProperty("transform");
     };
 
     card.addEventListener("mouseenter", () => {
@@ -2513,7 +2518,7 @@ function setupTiltCards() {
         if (!rect.width || !rect.height) return reset();
         const rotX = (y / rect.height * 2 - 1) * -4.2;
         const rotY = (x / rect.width * 2 - 1) * 4.2;
-        card.style.transform = `perspective(1000px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+        surface.style.transform = `perspective(1000px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
         card.style.setProperty("--glare-x", `${((x / rect.width) * 100).toFixed(1)}%`);
         card.style.setProperty("--glare-y", `${((y / rect.height) * 100).toFixed(1)}%`);
       });

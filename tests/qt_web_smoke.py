@@ -36,7 +36,7 @@ os.environ.setdefault(
 )
 
 try:
-    from PyQt5.QtCore import QEventLoop, QTimer, QUrl
+    from PyQt5.QtCore import QEventLoop, QTimer, QUrl, Qt
     from PyQt5.QtWebEngineWidgets import (
         QWebEnginePage,
         QWebEngineProfile,
@@ -254,6 +254,8 @@ def main() -> int:
             view = QWebEngineView()
             view.setPage(page)
             view.resize(960, 640)
+            # Synthetic DOM events drive this test; the user's live cursor must not interfere.
+            view.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             view.show()
 
             load_url(view, page_url, timeout_ms)
@@ -305,6 +307,8 @@ def main() -> int:
             evaluate(page, """(() => {
                 window.__tiltCard = document.querySelector('#overviewPanel .glass-card');
                 const card = window.__tiltCard;
+                const text = card.querySelector('.kpi-value').getBoundingClientRect();
+                window.__textBeforeTilt = [text.x, text.y, text.width, text.height];
                 const r = card.getBoundingClientRect();
                 card.dispatchEvent(new MouseEvent('mouseenter'));
                 card.dispatchEvent(new MouseEvent('mousemove', {
@@ -314,8 +318,11 @@ def main() -> int:
             tilt_check = json.loads(evaluate(page, """JSON.stringify((() => {
                 const card = window.__tiltCard;
                 const glare = card.querySelector('.specular-glare');
+                const text = card.querySelector('.kpi-value').getBoundingClientRect();
                 render({statusOnly:true});
-                return {transform:getComputedStyle(card).transform,
+                return {transform:getComputedStyle(card.querySelector('.tilt-surface')).transform,
+                    textTransform:getComputedStyle(card).transform,
+                    textUnmoved:JSON.stringify([text.x,text.y,text.width,text.height]) === JSON.stringify(window.__textBeforeTilt),
                     glareWidth:glare.getBoundingClientRect().width,
                     glareHeight:glare.getBoundingClientRect().height,
                     glareOpacity:Number(getComputedStyle(glare).opacity),
@@ -323,11 +330,16 @@ def main() -> int:
             })())""", timeout_ms))
             if (tilt_check['transform'] == 'none' or tilt_check['glareWidth'] <= 0
                     or tilt_check['glareHeight'] <= 0 or tilt_check['glareOpacity'] < .5
+                    or tilt_check['textTransform'] != 'none' or not tilt_check['textUnmoved']
                     or not tilt_check['sameCard']):
                 raise AssertionError(f"Tilt/mirror/progress repaint regression: {tilt_check!r}")
             evaluate(page, "window.__tiltCard.dispatchEvent(new MouseEvent('mouseleave'))", timeout_ms)
             wait_ms(650)
-            rest_transform = evaluate(page, "getComputedStyle(window.__tiltCard).transform", timeout_ms)
+            rest_transform = evaluate(page, "getComputedStyle(window.__tiltCard.querySelector('.tilt-surface')).transform", timeout_ms)
+            settle_deadline = monotonic() + 3
+            while rest_transform != 'none' and monotonic() < settle_deadline:
+                wait_ms(100)
+                rest_transform = evaluate(page, "getComputedStyle(window.__tiltCard.querySelector('.tilt-surface')).transform", timeout_ms)
             if rest_transform != 'none':
                 raise AssertionError(f'Card failed to settle flat after mouse leave: {rest_transform}')
 
@@ -384,6 +396,25 @@ def main() -> int:
             wait_ms(600)
             if not view.grab().save(str(args.artifact_dir / 'qt-web-tilt.png'), 'PNG'):
                 raise OSError('Failed to save tilted card screenshot')
+            for width in (1440, 900, 480):
+                view.resize(width, 1000)
+                wait_ms(350)
+                layout = json.loads(evaluate(page, """JSON.stringify((() => {
+                    const grid = document.querySelector('.kpi-grid').getBoundingClientRect();
+                    const flow = document.querySelector('.flow-card').getBoundingClientRect();
+                    const badges = [...document.querySelectorAll('.kpi-cost-badge')];
+                    badges.forEach(b => b.querySelector('strong').textContent = '部分估算 ¥19,266.57（部分估算 $2,675.91）');
+                    return {sectionGap:flow.top-grid.bottom,
+                        overflow:document.documentElement.scrollWidth > window.innerWidth,
+                        costOverflow:badges.some(b => b.scrollWidth > b.clientWidth+1)};
+                })())""", timeout_ms))
+                if layout['sectionGap'] < 27 or layout['overflow'] or layout['costOverflow']:
+                    raise AssertionError(f'Layout regression at {width}px: {layout!r}')
+            view.resize(1440, 1000)
+            evaluate(page, "document.getElementById('themeToggleBtn').click(); window.scrollTo(0, 150)", timeout_ms)
+            wait_ms(600)
+            if not view.grab().save(str(args.artifact_dir / 'qt-web-layout-dark.png'), 'PNG'):
+                raise OSError('Failed to save spacious dark layout screenshot')
             print(
                 json.dumps(
                     {
