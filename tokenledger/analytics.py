@@ -3,6 +3,9 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Iterable
+from functools import wraps
+from threading import RLock
+from time import monotonic
 
 try:
     from zoneinfo import ZoneInfo as _ZoneInfo
@@ -117,22 +120,26 @@ def _rows_with_local_date(
 def _reconcile_account_rollups(
     rows: Iterable[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Reconcile session-level events and account-day rollups intelligently.
-
-    For any (agent, date) where both session events and account rollups exist:
-    - If session total >= account rollup total, keep detailed session events (richer and higher volume);
-    - If account rollup total > session total, keep account rollup (capturing outside/desktop API activity).
-    """
+    """Choose the larger complete source only for identified matching coverage."""
     materialized = list(rows)
-    grouped: dict[tuple[str, Any], list[dict[str, Any]]] = defaultdict(list)
+    grouped: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in materialized:
-        grouped[(row["agent"], row["local_date"])].append(row)
+        platform = str(row.get("platform") or "").strip().casefold()
+        model = str(row.get("model") or "").strip().casefold()
+        route = str(row.get("route") or "")
+        known = bool(platform and model and "未" not in platform and "未" not in model
+                     and "cc switch" in route.casefold())
+        # Reconcile only matching, identified CC Switch coverage. Keep unrelated
+        # platforms and direct connections even when a larger daily rollup exists.
+        scope = "ccswitch" if "cc switch" in route.casefold() else route
+        identity = (platform, model, scope) if known else (id(row),)
+        grouped[(row["agent"], row["local_date"], *identity)].append(row)
 
     kept: list[dict[str, Any]] = []
     suppressed_session: list[dict[str, Any]] = []
     suppressed_account: list[dict[str, Any]] = []
 
-    for (agent, local_date), group_rows in grouped.items():
+    for group_rows in grouped.values():
         session_items = [r for r in group_rows if r.get("usage_scope") != "account_daily"]
         account_items = [r for r in group_rows if r.get("usage_scope") == "account_daily"]
 
@@ -159,6 +166,13 @@ def _reconcile_account_rollups(
             if row["agent"] == agent and row.get("usage_scope") == "account_daily"
         ]
         removed = [row for row in suppressed_session if row["agent"] == agent]
+        account_dates = {row["local_date"] for row in materialized
+                         if row["agent"] == agent and row.get("usage_scope") == "account_daily"}
+        uncertain = [row for row in kept if row["agent"] == agent
+                     and row.get("usage_scope") != "account_daily"
+                     and row["local_date"] in account_dates
+                     and (not row.get("platform") or not row.get("model")
+                          or "未" in str(row.get("platform")) or "未" in str(row.get("model")))]
         diagnostics[agent] = {
             "has_account_rollup": bool(account_rows),
             "account_days": len({row["local_date"] for row in account_rows}),
@@ -166,7 +180,9 @@ def _reconcile_account_rollups(
             "account_calls": sum(max(int(row.get("call_count") or 0), 0) for row in account_rows),
             "suppressed_session_events": len(removed),
             "suppressed_session_tokens": sum(int(row.get("total_tokens") or 0) for row in removed),
-            "policy": "同日同时存在会话明细与账户汇总时，智能优选覆盖度更完整的数据源",
+            "uncertain_overlap": bool(uncertain),
+            "uncertain_overlap_events": len(uncertain),
+            "policy": "仅对同日同平台同模型同路由的覆盖取较大值；身份未知记录保留，可能重叠，不能视为精确账单",
         }
     return kept, diagnostics
 
@@ -178,14 +194,14 @@ def _quota_for_agent(raw: list[dict[str, Any]], now: datetime) -> tuple[dict[str
     for item in raw:
         output = {
             "snapshot_id": item.get("snapshot_id"),
-            "status": item["status"],
-            "label": item["label"],
-            "remaining_percent": item["remaining_percent"],
-            "used_percent": item["used_percent"],
-            "window_minutes": item["window_minutes"],
-            "resets_at": item["resets_at"],
-            "updated_at": item["updated_at"],
-            "message": item["message"],
+            "status": item.get("status", "unavailable"),
+            "label": item.get("label", "官方额度未提供"),
+            "remaining_percent": item.get("remaining_percent"),
+            "used_percent": item.get("used_percent"),
+            "window_minutes": item.get("window_minutes"),
+            "resets_at": item.get("resets_at"),
+            "updated_at": item.get("updated_at"),
+            "message": item.get("message", ""),
         }
         for extra_key in ("balance_text", "is_current", "website_url", "provider_name"):
             if extra_key in item:
@@ -195,19 +211,20 @@ def _quota_for_agent(raw: list[dict[str, Any]], now: datetime) -> tuple[dict[str
             try:
                 reset_time = _parse_timestamp(resets_at)
                 if now >= reset_time:
-                    output["status"] = "fresh"
-                    output["remaining_percent"] = 100.0
-                    output["used_percent"] = 0.0
-                    output["message"] = "额度重置周期已届满，已自动重置为 100%"
+                    output["status"] = "stale"
+                    output["remaining_percent"] = None
+                    output["used_percent"] = None
+                    output["message"] = "旧额度窗口已过期，等待新的服务端快照"
             except (TypeError, ValueError):
                 pass
         try:
-            age = now - _parse_timestamp(item["updated_at"])
-            if age > timedelta(hours=24) and output["status"] != "fresh":
+            age = now - _parse_timestamp(item.get("updated_at") or "")
+            if age > timedelta(hours=24):
                 output["status"] = "stale"
                 output["message"] = "超过 24 小时未获得新的服务端额度窗口"
         except (TypeError, ValueError):
-            output["status"] = "stale"
+            if output["status"] != "unavailable":
+                output["status"] = "stale"
         windows.append(output)
 
     def _quota_sort_key(item: dict[str, Any]) -> tuple[int, int, int]:
@@ -242,239 +259,29 @@ class _DashboardSnapshotCache:
         self.payload_cache.clear()
 
 
-USD_TO_CNY = 7.20
-
-PRICING_CATALOG: dict[str, dict[str, Any]] = {
-    # OpenAI / Codex Frontier Family
-    "gpt-5.6-sol": {"input": 2.50, "cache": 1.25, "output": 10.00, "currency": "USD", "source": "OpenAI 官方定价 (Sol 旗舰)"},
-    "gpt-5.6-luna": {"input": 1.25, "cache": 0.3125, "output": 5.00, "currency": "USD", "source": "OpenAI 官方定价 (Luna 敏捷)"},
-    "codex-auto-review": {"input": 2.00, "cache": 0.50, "output": 8.00, "currency": "USD", "source": "OpenAI 官方定价 (代码审查)"},
-    "gpt-5.6-terra": {"input": 0.60, "cache": 0.15, "output": 2.40, "currency": "USD", "source": "OpenAI 官方定价 (Terra 高速)"},
-    "gpt-6-astra": {"input": 3.00, "cache": 1.50, "output": 12.00, "currency": "USD", "source": "OpenAI 官方定价 (Astra)"},
-    "gpt-5.5": {"input": 2.50, "cache": 1.25, "output": 10.00, "currency": "USD", "source": "OpenAI 官方定价 (GPT-5)"},
-    "gpt-5": {"input": 2.50, "cache": 1.25, "output": 10.00, "currency": "USD", "source": "OpenAI 官方定价 (GPT-5)"},
-    "gpt-6": {"input": 3.00, "cache": 1.50, "output": 12.00, "currency": "USD", "source": "OpenAI 官方定价 (GPT-6)"},
-    "gpt-4o-mini": {"input": 0.15, "cache": 0.075, "output": 0.60, "currency": "USD", "source": "OpenAI 官方定价"},
-    "gpt-4o": {"input": 2.50, "cache": 1.25, "output": 10.00, "currency": "USD", "source": "OpenAI 官方定价"},
-    "gpt-4-turbo": {"input": 10.00, "cache": 5.00, "output": 30.00, "currency": "USD", "source": "OpenAI 官方定价"},
-    "gpt-4": {"input": 30.00, "cache": 15.00, "output": 60.00, "currency": "USD", "source": "OpenAI 官方定价"},
-    "o1-mini": {"input": 3.00, "cache": 1.50, "output": 12.00, "currency": "USD", "source": "OpenAI 官方定价"},
-    "o1-preview": {"input": 15.00, "cache": 7.50, "output": 60.00, "currency": "USD", "source": "OpenAI 官方定价"},
-    "o1": {"input": 15.00, "cache": 7.50, "output": 60.00, "currency": "USD", "source": "OpenAI 官方定价"},
-    "o3-mini": {"input": 1.10, "cache": 0.55, "output": 4.40, "currency": "USD", "source": "OpenAI 官方定价"},
-    "chatgpt-4o-latest": {"input": 5.00, "cache": 2.50, "output": 15.00, "currency": "USD", "source": "OpenAI 官方定价"},
-
-    # DeepSeek Family
-    "deepseek-reasoner": {"input": 4.00, "cache": 1.00, "output": 16.00, "currency": "CNY", "source": "DeepSeek 官方定价 (R1)"},
-    "deepseek-chat": {"input": 1.00, "cache": 0.10, "output": 2.00, "currency": "CNY", "source": "DeepSeek 官方定价 (V3)"},
-    "deepseek-v4-pro": {"input": 2.00, "cache": 0.50, "output": 8.00, "currency": "CNY", "source": "DeepSeek 官方定价 (V4 Pro)"},
-    "deepseek-v4-flash": {"input": 0.50, "cache": 0.10, "output": 1.00, "currency": "CNY", "source": "DeepSeek 官方定价 (V4 Flash)"},
-    "deepseek-v4-flash-vision-exp": {"input": 0.50, "cache": 0.10, "output": 1.00, "currency": "CNY", "source": "DeepSeek 官方定价"},
-    "deepseek-coder": {"input": 1.00, "cache": 0.10, "output": 2.00, "currency": "CNY", "source": "DeepSeek 官方定价"},
-
-    # Claude Family (Anthropic)
-    "claude-3-7-sonnet": {"input": 3.00, "cache": 0.30, "output": 15.00, "currency": "USD", "source": "Anthropic 官方定价"},
-    "claude-3-5-sonnet": {"input": 3.00, "cache": 0.30, "output": 15.00, "currency": "USD", "source": "Anthropic 官方定价"},
-    "claude-sonnet-4-6": {"input": 3.00, "cache": 0.30, "output": 15.00, "currency": "USD", "source": "Anthropic 官方定价"},
-    "claude-sonnet-5": {"input": 3.00, "cache": 0.30, "output": 15.00, "currency": "USD", "source": "Anthropic 官方定价"},
-    "claude-3-5-haiku": {"input": 0.80, "cache": 0.08, "output": 4.00, "currency": "USD", "source": "Anthropic 官方定价"},
-    "claude-haiku-4-5": {"input": 0.80, "cache": 0.08, "output": 4.00, "currency": "USD", "source": "Anthropic 官方定价"},
-    "claude-3-haiku": {"input": 0.25, "cache": 0.025, "output": 1.25, "currency": "USD", "source": "Anthropic 官方定价"},
-    "claude-3-opus": {"input": 15.00, "cache": 1.50, "output": 75.00, "currency": "USD", "source": "Anthropic 官方定价"},
-    "claude-opus-5": {"input": 15.00, "cache": 1.50, "output": 75.00, "currency": "USD", "source": "Anthropic 官方定价"},
-
-    # Gemini Family (Google DeepMind)
-    "gemini-3.8-flash": {"input": 0.10, "cache": 0.025, "output": 0.40, "currency": "USD", "source": "Google 官方标准价"},
-    "gemini-3.7-flash": {"input": 0.10, "cache": 0.025, "output": 0.40, "currency": "USD", "source": "Google 官方标准价"},
-    "gemini-3.7-flash-exp-b": {"input": 0.10, "cache": 0.025, "output": 0.40, "currency": "USD", "source": "Google 官方标准价"},
-    "gemini-3.1-pro": {"input": 1.25, "cache": 0.31, "output": 5.00, "currency": "USD", "source": "Google 官方标准价"},
-    "gemini-2.5-pro": {"input": 1.25, "cache": 0.31, "output": 5.00, "currency": "USD", "source": "Google 官方标准价"},
-    "gemini-2.0-flash": {"input": 0.10, "cache": 0.025, "output": 0.40, "currency": "USD", "source": "Google 官方标准价"},
-    "gemini-2.0-pro": {"input": 1.25, "cache": 0.31, "output": 5.00, "currency": "USD", "source": "Google 官方标准价"},
-    "gemini-1.5-pro": {"input": 1.25, "cache": 0.31, "output": 5.00, "currency": "USD", "source": "Google 官方标准价"},
-    "gemini-1.5-flash": {"input": 0.075, "cache": 0.018, "output": 0.30, "currency": "USD", "source": "Google 官方标准价"},
-
-    # Domestic LLMs
-    "glm-5.3-flash": {"input": 0.10, "cache": 0.05, "output": 0.10, "currency": "CNY", "source": "智谱开放平台 (GLM Flash)"},
-    "glm-5.2": {"input": 1.00, "cache": 0.20, "output": 1.00, "currency": "CNY", "source": "智谱开放平台"},
-    "glm-4.7": {"input": 1.00, "cache": 0.20, "output": 1.00, "currency": "CNY", "source": "智谱开放平台"},
-    "glm-4.5-air": {"input": 0.50, "cache": 0.10, "output": 0.50, "currency": "CNY", "source": "智谱开放平台"},
-    "glm-4-plus": {"input": 10.00, "cache": 5.00, "output": 10.00, "currency": "CNY", "source": "智谱开放平台"},
-    "glm-4-flash": {"input": 0.10, "cache": 0.05, "output": 0.10, "currency": "CNY", "source": "智谱开放平台"},
-    "qwen-max": {"input": 16.00, "cache": 4.00, "output": 40.00, "currency": "CNY", "source": "阿里云百炼 (Qwen Max)"},
-    "qwen3.7-plus": {"input": 0.80, "cache": 0.20, "output": 2.00, "currency": "CNY", "source": "阿里云百炼 (Qwen Plus)"},
-    "qwen-plus": {"input": 0.80, "cache": 0.20, "output": 2.00, "currency": "CNY", "source": "阿里云百炼 (Qwen Plus)"},
-    "qwen-turbo": {"input": 0.30, "cache": 0.10, "output": 0.60, "currency": "CNY", "source": "阿里云百炼 (Qwen Turbo)"},
-    "qwen3.5-flash": {"input": 0.10, "cache": 0.05, "output": 0.20, "currency": "CNY", "source": "阿里云百炼 (Qwen Flash)"},
-    "moonshot-v1-8k": {"input": 12.00, "cache": 3.00, "output": 12.00, "currency": "CNY", "source": "Moonshot 开放平台"},
-    "doubao-pro": {"input": 0.80, "cache": 0.16, "output": 2.00, "currency": "CNY", "source": "火山引擎 (豆包 Pro)"},
-    "doubao-lite": {"input": 0.30, "cache": 0.06, "output": 0.60, "currency": "CNY", "source": "火山引擎 (豆包 Lite)"},
-    "minimax-abab6.5s": {"input": 1.00, "cache": 0.20, "output": 1.00, "currency": "CNY", "source": "MiniMax 开放平台"},
-}
+# Re-export for callers that used the original analytics pricing helpers.
+from .pricing import PRICING_CATALOG, USD_TO_CNY, estimate_token_cost, cost_summary
 
 
-def estimate_token_cost(
-    model_name: str,
-    input_tokens: int,
-    cached_input_tokens: int,
-    output_tokens: int,
-    agent: str = "",
-) -> dict[str, Any]:
-    """Estimate token cost and commercial equivalent value based on official pricing."""
-    target_key = None
-    m_lower = (model_name or "").lower().strip()
-
-    # Exact or prefix match against catalog (sorted by key length descending to prioritize more specific keys)
-    for key in sorted(PRICING_CATALOG.keys(), key=len, reverse=True):
-        if key == m_lower or m_lower.startswith(key):
-            target_key = key
-            break
-
-    if not target_key:
-        if "o1-mini" in m_lower:
-            target_key = "o1-mini"
-        elif "o1" in m_lower:
-            target_key = "o1"
-        elif "o3" in m_lower:
-            target_key = "o3-mini"
-        elif "gpt-4o-mini" in m_lower:
-            target_key = "gpt-4o-mini"
-        elif "gpt-4-turbo" in m_lower:
-            target_key = "gpt-4-turbo"
-        elif "gpt-4" in m_lower:
-            target_key = "gpt-4o"
-        elif "sol" in m_lower or "gpt-5" in m_lower or "gpt-6" in m_lower:
-            target_key = "gpt-5.6-sol"
-        elif "luna" in m_lower:
-            target_key = "gpt-5.6-luna"
-        elif "terra" in m_lower:
-            target_key = "gpt-5.6-terra"
-        elif "codex" in m_lower:
-            target_key = "codex-auto-review"
-        elif "deepseek" in m_lower:
-            if "r1" in m_lower or "reason" in m_lower:
-                target_key = "deepseek-reasoner"
-            elif "pro" in m_lower:
-                target_key = "deepseek-v4-pro"
-            elif "flash" in m_lower:
-                target_key = "deepseek-v4-flash"
-            else:
-                target_key = "deepseek-chat"
-        elif "claude" in m_lower or "anthropic" in m_lower:
-            if "opus" in m_lower:
-                target_key = "claude-3-opus"
-            elif "haiku" in m_lower:
-                target_key = "claude-3-5-haiku"
-            else:
-                target_key = "claude-3-7-sonnet"
-        elif "sonnet" in m_lower:
-            target_key = "claude-3-7-sonnet"
-        elif "haiku" in m_lower:
-            target_key = "claude-3-5-haiku"
-        elif "opus" in m_lower:
-            target_key = "claude-3-opus"
-        elif "gemini" in m_lower:
-            target_key = "gemini-3.1-pro" if "pro" in m_lower else "gemini-3.8-flash"
-        elif "glm" in m_lower or "chatglm" in m_lower:
-            if "flash" in m_lower:
-                target_key = "glm-5.3-flash"
-            elif "air" in m_lower:
-                target_key = "glm-4.5-air"
-            else:
-                target_key = "glm-4-plus"
-        elif "qwen" in m_lower or "tongyi" in m_lower:
-            if "max" in m_lower:
-                target_key = "qwen-max"
-            elif "plus" in m_lower:
-                target_key = "qwen3.7-plus"
-            elif "flash" in m_lower:
-                target_key = "qwen3.5-flash"
-            else:
-                target_key = "qwen-turbo"
-        elif "moonshot" in m_lower or "kimi" in m_lower:
-            target_key = "moonshot-v1-8k"
-        elif "doubao" in m_lower:
-            target_key = "doubao-lite" if "lite" in m_lower else "doubao-pro"
-        elif "minimax" in m_lower or "abab" in m_lower:
-            target_key = "minimax-abab6.5s"
-        elif "flash" in m_lower:
-            target_key = "gemini-3.7-flash"
-        elif "pro" in m_lower:
-            target_key = "gemini-3.1-pro"
-        elif agent == "codex":
-            target_key = "gpt-5.6-sol"
-        elif agent == "claude":
-            target_key = "deepseek-v4-pro"
-        elif agent == "antigravity":
-            target_key = "gemini-3.8-flash"
-        else:
-            target_key = "gemini-3.8-flash"
-
-    rule = PRICING_CATALOG.get(target_key, PRICING_CATALOG["gemini-3.8-flash"])
-    currency = rule["currency"]
-    inp_rate = rule["input"]
-    cache_rate = rule["cache"]
-    out_rate = rule["output"]
-
-    uncached_inp = max(input_tokens - cached_input_tokens, 0)
-    # Token rates are per 1M (1,000,000) tokens
-    raw_cost = (
-        (uncached_inp / 1_000_000.0) * inp_rate
-        + (cached_input_tokens / 1_000_000.0) * cache_rate
-        + (output_tokens / 1_000_000.0) * out_rate
-    )
-
-    if currency == "USD":
-        cost_usd = raw_cost
-        cost_cny = raw_cost * USD_TO_CNY
-    else:
-        cost_cny = raw_cost
-        cost_usd = raw_cost / USD_TO_CNY
-
-    cost_cny_text = f"¥{cost_cny:,.2f}" if cost_cny >= 0.01 else f"¥{cost_cny:,.4f}"
-    cost_usd_text = f"${cost_usd:,.2f}" if cost_usd >= 0.01 else f"${cost_usd:,.4f}"
-
-    sym = "$" if currency == "USD" else "¥"
-    unit_rate_text = f"输入 {sym}{inp_rate}/M · 缓存 {sym}{cache_rate}/M · 输出 {sym}{out_rate}/M"
-
-    return {
-        "cost_cny": round(cost_cny, 4),
-        "cost_usd": round(cost_usd, 4),
-        "cost_cny_text": cost_cny_text,
-        "cost_usd_text": cost_usd_text,
-        "pricing_source": rule["source"],
-        "pricing_model_matched": target_key,
-        "unit_rate_text": unit_rate_text,
-    }
-
-
-def _calculate_total_cost(rows: Sequence[dict[str, Any]]) -> tuple[float, float, str, str]:
-    """Calculate commercial equivalent cost for a collection of usage rows."""
-    cny = 0.0
-    usd = 0.0
-    buckets: dict[tuple[str, str], list[int]] = defaultdict(lambda: [0, 0, 0])
-    for r in rows:
-        m = r.get("model") or ""
-        a = r.get("agent") or ""
-        inp = r.get("input_tokens") or 0
-        cinp = r.get("cached_input_tokens") or 0
-        out = r.get("output_tokens") or 0
-        b = buckets[(a, m)]
-        b[0] += inp
-        b[1] += cinp
-        b[2] += out
-    for (a, m), (inp, cinp, out) in buckets.items():
-        ci = estimate_token_cost(m, inp, cinp, out, agent=a)
-        cny += ci["cost_cny"]
-        usd += ci["cost_usd"]
-    cny_text = f"¥{cny:,.2f}" if cny >= 0.01 else f"¥{cny:,.4f}"
-    usd_text = f"${usd:,.2f}" if usd >= 0.01 else f"${usd:,.4f}"
-    return round(cny, 2), round(usd, 2), cny_text, usd_text
+def _calculate_total_cost(rows: Iterable[dict[str, Any]]) -> tuple[float, float, str, str]:
+    value = cost_summary(rows)
+    return (value["estimated_cost_cny"], value["estimated_cost_usd"],
+            value["cost_cny_text"], value["cost_usd_text"])
 
 
 _CACHE = _DashboardSnapshotCache()
+_CACHE_LOCK = RLock()
 
 
+def _serialized(function):
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        with _CACHE_LOCK:
+            return function(*args, **kwargs)
+    return wrapped
+
+
+@_serialized
 def build_dashboard(
     database: TokenDatabase,
     scan_status: dict[str, Any],
@@ -490,7 +297,7 @@ def build_dashboard(
     internal_version = getattr(database, "_internal_version", 0)
     data_ver_fn = getattr(database, "data_version", None)
     db_data_version = data_ver_fn() if callable(data_ver_fn) else 0
-    cache_key = (db_path, internal_version, db_data_version, timezone_name)
+    cache_key = (db_path, internal_version, db_data_version, timezone_name, int(monotonic() // 15))
 
     if _CACHE.key != cache_key or _CACHE.local_today != local_today:
         _CACHE.clear()
@@ -503,22 +310,14 @@ def build_dashboard(
         _CACHE.lifetime_rows = lifetime_rows
         _CACHE.lifetime_reconciliation = lifetime_reconciliation
         lt_summary = _metrics(lifetime_rows)
-        lt_cny, lt_usd, lt_cny_t, lt_usd_t = _calculate_total_cost(lifetime_rows)
-        lt_summary["estimated_cost_cny"] = lt_cny
-        lt_summary["estimated_cost_usd"] = lt_usd
-        lt_summary["cost_cny_text"] = lt_cny_t
-        lt_summary["cost_usd_text"] = lt_usd_t
+        lt_summary.update(cost_summary(lifetime_rows))
         _CACHE.lifetime_summary = lt_summary
 
         lifetime_agents = {}
         for provider in REGISTRY:
             p_rows = [row for row in lifetime_rows if row["agent"] == provider.id]
             p_metric = _metrics(p_rows)
-            p_cny, p_usd, p_cny_t, p_usd_t = _calculate_total_cost(p_rows)
-            p_metric["estimated_cost_cny"] = p_cny
-            p_metric["estimated_cost_usd"] = p_usd
-            p_metric["cost_cny_text"] = p_cny_t
-            p_metric["cost_usd_text"] = p_usd_t
+            p_metric.update(cost_summary(p_rows))
             lifetime_agents[provider.id] = p_metric
         _CACHE.lifetime_agents = lifetime_agents
 
@@ -538,11 +337,7 @@ def build_dashboard(
     if selected_agent:
         scoped_lifetime = [row for row in all_lifetime if row["agent"] == selected_agent]
         lifetime_summary = _metrics(scoped_lifetime)
-        lt_cny, lt_usd, lt_cny_t, lt_usd_t = _calculate_total_cost(scoped_lifetime)
-        lifetime_summary["estimated_cost_cny"] = lt_cny
-        lifetime_summary["estimated_cost_usd"] = lt_usd
-        lifetime_summary["cost_cny_text"] = lt_cny_t
-        lifetime_summary["cost_usd_text"] = lt_usd_t
+        lifetime_summary.update(cost_summary(scoped_lifetime))
         lifetime_reconciliation = {
             selected_agent: _CACHE.lifetime_reconciliation.get(selected_agent, {})
         }
@@ -582,7 +377,7 @@ def build_dashboard(
     while cursor <= local_today:
         day_rows = daily_buckets.get(cursor, [])
         metric = _metrics(day_rows)
-        d_cny, d_usd, d_cny_t, d_usd_t = _calculate_total_cost(day_rows)
+        day_cost = cost_summary(day_rows)
         daily.append(
             {
                 "date": cursor.isoformat(),
@@ -591,10 +386,9 @@ def build_dashboard(
                 "cached_input": metric["cached_input"],
                 "output": metric["output"],
                 "estimated_total": metric["estimated_total"],
-                "cost_cny": d_cny,
-                "cost_usd": d_usd,
-                "cost_cny_text": d_cny_t,
-                "cost_usd_text": d_usd_t,
+                "cost_cny": day_cost["estimated_cost_cny"],
+                "cost_usd": day_cost["estimated_cost_usd"],
+                **day_cost,
             }
         )
         cursor += timedelta(days=1)
@@ -605,7 +399,6 @@ def build_dashboard(
     for provider in REGISTRY:
         bucket = agent_buckets.get(provider.id, [])
         metric = _metrics(bucket)
-        p_cny, p_usd, p_cny_t, p_usd_t = _calculate_total_cost(bucket)
         lt_agent = _CACHE.lifetime_agents.get(provider.id, {})
         state = states.get(provider.id, {})
         provider_metadata = state.get("metadata", {})
@@ -613,8 +406,7 @@ def build_dashboard(
             metric["sessions"] = int(state.get("session_count") or 0)
         quota, quota_windows = _quota_for_agent(quotas.get(provider.id, []), now)
         if (not quota or provider.id == "claude") and provider_metadata.get("budget_windows"):
-            quota_windows = list(provider_metadata["budget_windows"])
-            quota = quota_windows[0] if quota_windows else quota
+            quota, quota_windows = _quota_for_agent(list(provider_metadata["budget_windows"]), now)
         if not quota and provider.id != "codex":
             quota = {
                 "status": "unavailable",
@@ -625,25 +417,6 @@ def build_dashboard(
                 "message": provider_metadata.get("quota_note") or "本地日志可统计 Token，但没有可靠的服务端额度来源",
             }
         claude_benchmark = None
-        if provider.id == "claude" and bucket:
-            c_inp = sum(r.get("input_tokens") or 0 for r in bucket)
-            c_cinp = sum(r.get("cached_input_tokens") or 0 for r in bucket)
-            c_out = sum(r.get("output_tokens") or 0 for r in bucket)
-            c_uncached = max(c_inp - c_cinp, 0)
-            bm_cny = (c_uncached / 1_000_000.0 * 21.60) + (c_cinp / 1_000_000.0 * 2.16) + (c_out / 1_000_000.0 * 108.00)
-            bm_usd = bm_cny / USD_TO_CNY
-            diff_cny = max(bm_cny - p_cny, 0)
-            saved_pct = round((diff_cny / bm_cny) * 100, 1) if bm_cny > 0 else 0
-            claude_benchmark = {
-                "benchmark_model": "claude-3-5-sonnet",
-                "benchmark_name": "Claude 3.5 Sonnet 官方原生对标",
-                "benchmark_cny": round(bm_cny, 2),
-                "benchmark_usd": round(bm_usd, 2),
-                "benchmark_cny_text": f"¥{bm_cny:,.2f}",
-                "benchmark_usd_text": f"${bm_usd:,.2f}",
-                "saved_cny_text": f"¥{diff_cny:,.2f}",
-                "saved_percent": saved_pct,
-            }
 
         agents.append(
             {
@@ -653,10 +426,7 @@ def build_dashboard(
                 "color": provider.color,
                 "status": state.get("status", "pending"),
                 **metric,
-                "estimated_cost_cny": p_cny,
-                "estimated_cost_usd": p_usd,
-                "cost_cny_text": p_cny_t,
-                "cost_usd_text": p_usd_t,
+                **cost_summary(bucket),
                 "lifetime_cost_cny_text": lt_agent.get("cost_cny_text", "¥0.00"),
                 "lifetime_cost_usd_text": lt_agent.get("cost_usd_text", "$0.00"),
                 "models": len({row["model"] for row in bucket}),
@@ -674,17 +444,14 @@ def build_dashboard(
 
     total_all = sum(row["total_tokens"] for row in rows_with_date)
     models = []
-    total_cost_cny = 0.0
-    total_cost_usd = 0.0
 
     for (agent, route, platform, model), bucket in model_buckets.items():
         total = sum(row["total_tokens"] for row in bucket)
         inp = sum(row.get("input_tokens") or 0 for row in bucket)
         cinp = sum(row.get("cached_input_tokens") or 0 for row in bucket)
         out = sum(row.get("output_tokens") or 0 for row in bucket)
-        cost_info = estimate_token_cost(model, inp, cinp, out, agent=agent)
-        total_cost_cny += cost_info["cost_cny"]
-        total_cost_usd += cost_info["cost_usd"]
+        cwrite = sum(row.get("cache_write_tokens") or 0 for row in bucket)
+        cost_info = estimate_token_cost(model, inp, cinp, out, agent=agent, cache_write_tokens=cwrite)
 
         models.append(
             {
@@ -695,6 +462,7 @@ def build_dashboard(
                 "total": total,
                 "input": inp,
                 "cached_input": cinp,
+                "cache_write": cwrite,
                 "output": out,
                 "share": (total / total_all) if total_all else 0,
                 "usage_mode": "estimated" if all(row.get("usage_mode") == "estimated" for row in bucket) else "reported",
@@ -702,6 +470,8 @@ def build_dashboard(
                 if all(row.get("usage_scope") == "account_daily" for row in bucket)
                 else "session",
                 "cost_cny": cost_info["cost_cny"],
+                "cost_known": cost_info["cost_known"],
+                "pricing_checked_at": cost_info["pricing_checked_at"],
                 "cost_usd": cost_info["cost_usd"],
                 "cost_cny_text": cost_info["cost_cny_text"],
                 "cost_usd_text": cost_info["cost_usd_text"],
@@ -729,15 +499,7 @@ def build_dashboard(
     ]
 
     summary_metric = _metrics(rows_with_date)
-    summary_metric["estimated_cost_cny"] = round(total_cost_cny, 2)
-    summary_metric["estimated_cost_usd"] = round(total_cost_usd, 2)
-    summary_metric["cost_cny_text"] = f"¥{total_cost_cny:,.2f}"
-    summary_metric["cost_usd_text"] = f"${total_cost_usd:,.2f}"
-    if selected_agent == "claude":
-        for a in agents:
-            if a["id"] == "claude" and a.get("claude_benchmark"):
-                summary_metric["claude_benchmark"] = a["claude_benchmark"]
-                break
+    summary_metric.update(cost_summary(rows_with_date))
 
     payload = {
         "meta": {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 from tokenledger.models import DiscoveredFile
@@ -176,23 +177,27 @@ def test_antigravity_estimates_visible_text_and_marks_it_estimated(tmp_path: Pat
     assert probe.metadata["event_types"] == ["CHECKPOINT", "PLANNER_RESPONSE", "USER_INPUT"]
 
 
-def test_antigravity_fetches_quota_windows_or_fallback(tmp_path: Path) -> None:
+def test_antigravity_returns_unknown_quota_without_server(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / ".gemini" / "antigravity").mkdir(parents=True)
+    class FakePsutil:
+        class NoSuchProcess(Exception):
+            pass
+
+        class AccessDenied(Exception):
+            pass
+
+        @staticmethod
+        def process_iter(*args, **kwargs):
+            return []
+
+    monkeypatch.setitem(sys.modules, "psutil", FakePsutil)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "no-real-home"))
     adapter = AntigravityAdapter(tmp_path)
     quotas = adapter._fetch_quota_windows()
-    assert len(quotas) >= 2
-    labels = [q.label for q in quotas]
-    assert any("Gemini 每周限额" in l for l in labels)
-    assert any("Gemini 5小时限额" in l for l in labels)
-    weekly = next(q for q in quotas if "Gemini 每周限额" in q.label)
-    assert weekly.window_minutes == 10080
-    assert weekly.remaining_percent is not None
-    h5 = next(q for q in quotas if "Gemini 5小时限额" in q.label)
-    assert h5.window_minutes == 300
-    assert h5.remaining_percent is not None
+    assert quotas == []
     probe = adapter.probe()
     assert "budget_windows" in probe.metadata
-    assert len(probe.metadata["budget_windows"]) >= 2
+    assert probe.metadata["budget_windows"] == []
 
 
 def test_cc_switch_budget_uses_configured_limit_and_local_rollup(tmp_path: Path) -> None:

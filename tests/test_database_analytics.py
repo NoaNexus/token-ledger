@@ -101,8 +101,8 @@ def test_account_day_rollup_replaces_overlapping_claude_session_usage(tmp_path: 
                 event_id="session-overlap",
                 agent="claude",
                 route="CC Switch",
-                platform="平台未识别（历史）",
-                model="session-model",
+                platform="DeepSeek",
+                model="deepseek-test",
                 session_id="session-overlap",
                 occurred_at="2026-08-28T01:00:00Z",
                 input_tokens=100,
@@ -203,25 +203,20 @@ def test_temporary_cc_switch_read_error_keeps_last_valid_account_rollup(tmp_path
 def test_estimate_token_cost_and_dashboard_pricing(tmp_path: Path) -> None:
     # Test individual estimation
     cost_gemini = analytics.estimate_token_cost("gemini-3.8-flash", 1_000_000, 0, 1_000_000)
-    assert cost_gemini["cost_usd"] == 0.50
-    assert cost_gemini["cost_cny"] == 3.60
-    assert cost_gemini["cost_usd_text"] == "$0.50"
-    assert cost_gemini["cost_cny_text"] == "¥3.60"
+    assert cost_gemini["cost_known"] is False
+    assert cost_gemini["cost_usd_text"] == "未提供"
 
     cost_deepseek = analytics.estimate_token_cost("deepseek-chat", 1_000_000, 0, 1_000_000)
-    assert cost_deepseek["cost_cny"] == 3.00
-    assert cost_deepseek["cost_cny_text"] == "¥3.00"
+    assert cost_deepseek["cost_known"] is False
+    assert cost_deepseek["cost_cny_text"] == "未提供"
 
     # Test Codex frontier models
     cost_sol = analytics.estimate_token_cost("gpt-5.6-sol", 2_000_000, 1_000_000, 500_000)
-    # uncached 1M @ $2.50 + cached 1M @ $1.25 + output 0.5M @ $10.00 = 2.50 + 1.25 + 5.00 = $8.75
-    assert cost_sol["cost_usd"] == 8.75
-    assert cost_sol["cost_cny"] == round(8.75 * 7.20, 4)
-    assert "OpenAI 官方定价" in cost_sol["pricing_source"]
+    assert cost_sol["cost_usd"] == 14.4
+    assert "developers.openai.com" in cost_sol["pricing_source"]
 
     cost_luna = analytics.estimate_token_cost("gpt-5.6-luna", 1_000_000, 0, 1_000_000)
-    # 1M @ $1.25 + 1M @ $5.00 = $6.25
-    assert cost_luna["cost_usd"] == 6.25
+    assert cost_luna["cost_usd"] == 1.4
 
     # Test dashboard integration with pricing and lifetime cost fields
     database = TokenDatabase(tmp_path / "pricing_ledger.db")
@@ -287,8 +282,7 @@ def test_estimate_token_cost_and_dashboard_pricing(tmp_path: Path) -> None:
         selected_agent="claude",
     )
     claude_agent = next(a for a in dash_claude["agents"] if a["id"] == "claude")
-    assert claude_agent.get("claude_benchmark") is not None
-    assert "Claude 3.5 Sonnet" in claude_agent["claude_benchmark"]["benchmark_name"]
-    assert claude_agent["claude_benchmark"]["saved_percent"] > 0
-    assert dash_claude["summary"].get("claude_benchmark") is not None
-
+    assert claude_agent.get("claude_benchmark") is None
+    assert dash_claude["summary"].get("claude_benchmark") is None
+    assert dash_claude["summary"]["has_unpriced_usage"] is True
+    assert dash_claude["summary"]["cost_cny_text"] == "未提供"

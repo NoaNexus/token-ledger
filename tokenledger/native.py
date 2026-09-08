@@ -10,7 +10,7 @@ from .config import default_data_dir
 
 
 APP_NAME = "Token 账本"
-APP_VERSION = "2.4.2"
+APP_VERSION = "2.4.3"
 _INSTANCE_HANDLE: int | None = None
 
 

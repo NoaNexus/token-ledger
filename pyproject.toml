@@ -4,13 +4,17 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "token-ledger-local"
-version = "2.4.2"
+version = "2.4.3"
 description = "Local-first Windows token usage dashboard for Codex, Claude Code, and Antigravity"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "Token Ledger contributors" }]
-dependencies = ["PySide6-Essentials==6.8.3"]
+dependencies = [
+  "PyQt5>=5.15.7",
+  "PyQtWebEngine>=5.15.6",
+  "psutil>=5.9.0",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Environment :: Win32 (MS Windows)",

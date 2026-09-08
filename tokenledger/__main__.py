@@ -8,7 +8,7 @@ import threading
 import webbrowser
 from pathlib import Path
 
-from .api import TokenLedgerServer
+from .api import bind_local_server, local_server_url
 from .config import AppConfig, default_data_dir, default_user_home, resource_root
 from .db import TokenDatabase
 from .providers import AntigravityAdapter, ClaudeAdapter, CodexAdapter
@@ -62,19 +62,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
 
-    # If server is already running, activate window and exit cleanly
-    if args.port != 0 and not args.scan_only:
-        try:
-            import urllib.request
-            with urllib.request.urlopen(f"http://127.0.0.1:{args.port}/api/health", timeout=0.8):
-                from .native import activate_existing_window
-                if not activate_existing_window():
-                    if not args.no_browser:
-                        launch_desktop_window(f"http://127.0.0.1:{args.port}/")
-                return 0
-        except Exception:
-            pass
-
     config = AppConfig(
         user_home=args.user_home.expanduser().resolve(),
         data_dir=args.data_dir.expanduser().resolve(),
@@ -91,11 +78,13 @@ def main() -> int:
         print(result["message"])
         return 0
 
-    server = TokenLedgerServer(config, database, scanner)
-    port = server.server_address[1]
-    url = f"http://127.0.0.1:{port}/"
+    # Prefer the requested port, then use an OS-assigned local port if it is
+    # already occupied.  Never attach to an identity-unknown listener.
+    server = bind_local_server(config, database, scanner)
+    url = local_server_url(server)
     scanner.start_background(force=args.force)
     stop_scans = threading.Event()
+    browser_timer: threading.Timer | None = None
     if args.scan_interval > 0:
         interval = max(args.scan_interval, 15)
 
@@ -105,7 +94,9 @@ def main() -> int:
 
         threading.Thread(target=scan_periodically, daemon=True, name="token-ledger-auto-scan").start()
     if config.open_browser:
-        threading.Timer(0.5, lambda: launch_desktop_window(url)).start()
+        browser_timer = threading.Timer(0.5, lambda: launch_desktop_window(url))
+        browser_timer.daemon = True
+        browser_timer.start()
     print(f"Token Ledger 已启动：{url}")
     print(f"本地索引：{config.database_path}")
     print("按 Ctrl+C 停止。")
@@ -115,6 +106,8 @@ def main() -> int:
         pass
     finally:
         stop_scans.set()
+        if browser_timer is not None:
+            browser_timer.cancel()
         server.server_close()
     return 0
 

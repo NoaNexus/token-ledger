@@ -30,7 +30,7 @@ def _reasoning_tokens(details: Any) -> int:
 
 class ClaudeAdapter(ProviderAdapter):
     descriptor = descriptor("claude")
-    parser_revision = "cc-switch-proxy-plus-3p-v2"
+    parser_revision = "cc-switch-proxy-plus-3p-v3"
 
     @property
     def claude_home(self) -> Path:
@@ -105,7 +105,7 @@ class ClaudeAdapter(ProviderAdapter):
                 "current_route": switch.route,
                 "current_platform": switch.platform,
                 "account_rollup": rollup,
-                "reconciliation_policy": "同日存在 CC Switch 账户汇总时，账户汇总优先；会话日志仅补足无汇总日期",
+                "reconciliation_policy": "仅对同日同平台同模型同路由的覆盖取较大值；身份未知记录保留，可能重叠，不能视为精确账单",
                 "budget_windows": all_budget_windows,
                 "ccswitch_providers": ccswitch_sources,
                 "quota_note": (
@@ -115,13 +115,38 @@ class ClaudeAdapter(ProviderAdapter):
             },
         )
 
+    def _switch_meta_signature(self) -> tuple[tuple[str, int | None, int | None], ...]:
+        database_path = self.user_home / ".cc-switch" / "cc-switch.db"
+        paths = (
+            database_path,
+            Path(f"{database_path}-wal"),
+            Path(f"{database_path}-shm"),
+            self.claude_home / "settings.json",
+        )
+        signature: list[tuple[str, int | None, int | None]] = []
+        for path in paths:
+            try:
+                stat = path.stat()
+                signature.append((str(path.resolve()).lower(), stat.st_mtime_ns, stat.st_size))
+            except OSError:
+                signature.append((str(path.resolve()).lower(), None, None))
+        return tuple(signature)
+
     def _get_switch_meta(self) -> tuple[str, dict[str, str], str]:
-        if not hasattr(self, "_cached_switch_meta"):
-            switch = detect_cc_switch(self.user_home)
-            route = "CC Switch" if switch.installed else "直接连接"
-            platforms = unique_model_platforms(self.user_home) if switch.installed else {}
-            self._cached_switch_meta = (route, platforms, switch.platform)
-        return self._cached_switch_meta
+        signature = self._switch_meta_signature()
+        cached = getattr(self, "_cached_switch_meta", None)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
+
+        switch = detect_cc_switch(self.user_home)
+        route = "CC Switch" if switch.installed else "直接连接"
+        platforms = unique_model_platforms(self.user_home) if switch.installed else {}
+        # A model absent from the unambiguous historical map must not inherit
+        # the current route's platform; that would relabel old sessions.
+        fallback_platform = "平台未识别（历史）" if switch.installed else switch.platform
+        result = (route, platforms, fallback_platform)
+        self._cached_switch_meta = (signature, result)
+        return result
 
     def parse_file(self, discovered: DiscoveredFile) -> ParsedFile:
         path = discovered.path

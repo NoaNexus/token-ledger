@@ -18,6 +18,9 @@ def test_reconcile_preserves_larger_session_events():
             "agent": "claude",
             "local_date": date(2026, 9, 2),
             "usage_scope": "session",
+            "route": "CC Switch",
+            "platform": "DeepSeek",
+            "model": "synthetic-model",
             "total_tokens": 50000,
             "call_count": 5,
         },
@@ -25,6 +28,9 @@ def test_reconcile_preserves_larger_session_events():
             "agent": "claude",
             "local_date": date(2026, 9, 2),
             "usage_scope": "account_daily",
+            "route": "CC Switch 账户日汇总",
+            "platform": "DeepSeek",
+            "model": "synthetic-model",
             "total_tokens": 4000,
             "call_count": 1,
         },
@@ -33,6 +39,9 @@ def test_reconcile_preserves_larger_session_events():
             "agent": "claude",
             "local_date": date(2026, 9, 3),
             "usage_scope": "session",
+            "route": "CC Switch",
+            "platform": "DeepSeek",
+            "model": "synthetic-model",
             "total_tokens": 1000,
             "call_count": 1,
         },
@@ -40,6 +49,9 @@ def test_reconcile_preserves_larger_session_events():
             "agent": "claude",
             "local_date": date(2026, 9, 3),
             "usage_scope": "account_daily",
+            "route": "CC Switch 账户日汇总",
+            "platform": "DeepSeek",
+            "model": "synthetic-model",
             "total_tokens": 60000,
             "call_count": 10,
         },
@@ -124,8 +136,9 @@ def test_ccswitch_provider_quotas_and_claude_probe(tmp_path: Path):
     first_window = probe.metadata["budget_windows"][0]
     assert "DeepSeek" in first_window["label"]
     assert "(当前路由)" in first_window["label"]
-    assert first_window["remaining_percent"] == 100.0
-    assert "60.24 CNY" in first_window["balance_text"]
+    assert first_window["status"] == "unavailable"
+    assert first_window["remaining_percent"] is None
+    assert first_window["balance_text"] is None
 
     sources = probe.metadata["ccswitch_providers"]
     assert len(sources) == 2

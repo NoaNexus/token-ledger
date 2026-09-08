@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import sys
+from dataclasses import replace
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,13 +33,36 @@ def _static_content_type(path: Path) -> str:
 
 class TokenLedgerServer(ThreadingHTTPServer):
     daemon_threads = True
-    allow_reuse_address = True
+    # Keep an occupied listener exclusive, including on Windows.  Reusing an
+    # active port can route a window to an unrelated local process.
+    allow_reuse_address = False
 
     def __init__(self, config: AppConfig, database: TokenDatabase, scanner: ScanCoordinator):
         self.config = config
         self.database = database
         self.scanner = scanner
         super().__init__((config.host, config.port), TokenLedgerHandler)
+
+
+def bind_local_server(config: AppConfig, database: TokenDatabase, scanner: ScanCoordinator) -> TokenLedgerServer:
+    """Bind the local server without ever reusing an unknown process on the requested port.
+
+    The desktop and command-line launchers prefer the configured port (8765 by
+    default).  If another listener owns it, retry with an OS-assigned local
+    port so the caller can use the actual bound address in its window URL.
+    """
+    try:
+        return TokenLedgerServer(config, database, scanner)
+    except OSError:
+        if config.port == 0:
+            raise
+        return TokenLedgerServer(replace(config, port=0), database, scanner)
+
+
+def local_server_url(server: TokenLedgerServer) -> str:
+    """Return the URL for the exact address selected by the bound server."""
+    host, port = server.server_address[:2]
+    return f"http://{host}:{port}/"
 
 
 class TokenLedgerHandler(BaseHTTPRequestHandler):
@@ -136,7 +161,10 @@ class TokenLedgerHandler(BaseHTTPRequestHandler):
             return
         if parsed_path == "/api/theme":
             query = parse_qs(urlparse(self.path).query)
-            theme = query.get("theme", ["dark"])[0]
+            theme = query.get("theme", [""])[0].lower()
+            if theme not in {"dark", "light"}:
+                self._send_json({"error": "invalid theme"}, HTTPStatus.BAD_REQUEST)
+                return
             is_dark = theme != "light"
             if sys.platform == "win32":
                 try:

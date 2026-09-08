@@ -52,11 +52,47 @@ const AGENT_COLORS = {
 
 function escapeHtml(value) {
   return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function costCnyValue(item) {
+  if (!item || item.cost_known === false) return "未提供";
+  return String(item.cost_cny_text || "未提供");
+}
+
+function costUsdValue(item) {
+  if (!item || item.cost_known === false || !item.cost_usd_text || item.cost_usd_text === "未提供") return "";
+  return String(item.cost_usd_text);
+}
+
+function costQualifier(item) {
+  return item?.has_unpriced_usage ? "API 参考估算 · 部分用量未定价" : "API 参考估算";
+}
+
+function costInlineText(item) {
+  const cny = costCnyValue(item);
+  const usd = costUsdValue(item);
+  return usd ? `${cny} (${usd})` : cny;
+}
+
+function costMarkup(item) {
+  const cny = escapeHtml(costCnyValue(item));
+  const usd = costUsdValue(item);
+  return `${cny}${usd ? ` <span class="model-cost-usd">(${escapeHtml(usd)})</span>` : ""}`;
+}
+
+function prefersReducedMotion() {
+  return typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function scrollToSection(target) {
+  if (!target) return;
+  target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" });
 }
 
 function safeColor(value, fallback = "#3B82F6") {
@@ -75,11 +111,13 @@ function stripZero(value) {
 }
 
 function ratioToPercent(value) {
+  if (value == null || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(100, number * 100)) : null;
 }
 
 function absolutePercent(value) {
+  if (value == null || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : null;
 }
@@ -172,14 +210,15 @@ function toast(message) {
 }
 
 function mockDashboard() {
+  // Deliberately small synthetic values; preview mode never represents a local account.
   const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
   const today = new Date();
   const daily = Array.from({ length: 30 }, (_, index) => {
     const date = new Date(today);
     date.setDate(today.getDate() - (29 - index));
-    const total = index % 6 === 0 ? (index + 4) * 2800000 : (index % 4 + 1) * 850000;
-    const input = Math.round(total * 0.96);
-    const cache = Math.round(input * 0.815);
+    const total = index % 6 === 0 ? (index % 5 + 1) * 900 : (index % 4 + 1) * 350;
+    const input = Math.round(total * 0.72);
+    const cache = Math.round(input * 0.55);
     const output = total - input;
     const dateStr = date.toISOString().slice(0, 10);
     return {
@@ -192,6 +231,9 @@ function mockDashboard() {
       output,
       reasoning: Math.round(output * 0.2),
       net_usage: (input - cache) + output,
+      cost_known: false,
+      cost_cny_text: "未提供",
+      has_unpriced_usage: true,
     };
   });
 
@@ -202,36 +244,22 @@ function mockDashboard() {
       short: "CX",
       color: "#10B981",
       status: "ready",
-      total: 5119267014,
-      input: 5083788493,
-      cached_input: 4907483136,
-      output: 17138369,
-      reasoning: 6299812,
-      net_usage: 193443726,
-      cache_hit_rate: 0.9653,
-      sessions: 32,
-      calls: 612,
+      total: 72000,
+      input: 68000,
+      cached_input: 56000,
+      output: 4000,
+      reasoning: 1200,
+      net_usage: 16000,
+      cache_hit_rate: 0.8235,
+      sessions: 3,
+      calls: 12,
       models: 2,
       quota: {
-        status: "fresh",
-        label: "每周窗口",
-        remaining_percent: 78.5,
-        used_percent: 21.5,
-        window_minutes: 10080,
-        resets_at: new Date(Date.now() + 86400000 * 3).toISOString(),
-        message: "每周额度充裕",
+        status: "unavailable",
+        label: "预览未加载额度",
+        remaining_percent: null,
+        message: "预览模式未读取账户额度",
       },
-      quota_windows: [
-        {
-          status: "fresh",
-          label: "每周窗口",
-          remaining_percent: 78.5,
-          used_percent: 21.5,
-          window_minutes: 10080,
-          resets_at: new Date(Date.now() + 86400000 * 3).toISOString(),
-          message: "每周额度充裕",
-        },
-      ],
     },
     {
       id: "claude",
@@ -239,15 +267,15 @@ function mockDashboard() {
       short: "CL",
       color: "#F97316",
       status: "ready",
-      total: 106830568,
-      input: 106108696,
-      cached_input: 102670592,
-      output: 721872,
+      total: 31000,
+      input: 29000,
+      cached_input: 20000,
+      output: 2000,
       reasoning: 0,
-      net_usage: 4159976,
-      cache_hit_rate: 0.9676,
-      sessions: 12,
-      calls: 188,
+      net_usage: 11000,
+      cache_hit_rate: 0.6897,
+      sessions: 2,
+      calls: 8,
       models: 2,
       quota: {
         status: "unavailable",
@@ -257,9 +285,9 @@ function mockDashboard() {
       },
       reconciliation: {
         has_account_rollup: true,
-        account_days: 30,
-        account_calls: 188,
-        suppressed_session_events: 12,
+        account_days: 2,
+        account_calls: 8,
+        suppressed_session_events: 0,
       },
     },
     {
@@ -268,96 +296,46 @@ function mockDashboard() {
       short: "AG",
       color: "#8B5CF6",
       status: "ready",
-      total: 205411591,
-      reported_total: 205411591,
+      total: 18000,
+      reported_total: 18000,
       estimated_total: 0,
       contains_estimates: false,
-      input: 204091389,
-      cached_input: 187337545,
-      output: 1320202,
-      reasoning: 504204,
-      net_usage: 18074046,
-      cache_hit_rate: 0.9179,
-      sessions: 28,
-      calls: 3853,
+      input: 16000,
+      cached_input: 11000,
+      output: 2000,
+      reasoning: 500,
+      net_usage: 7000,
+      cache_hit_rate: null,
+      sessions: 2,
+      calls: 9,
       models: 3,
       metadata: {
         usage_mode: "reported",
-        tool_calls_total: 1718,
+        tool_calls_total: 32,
         models: ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.7-flash-exp-b"],
-        reasoning_tokens: 504204,
-        thinking_ratio: 0.3819,
-        budget_windows: "DeepMind 1M 窗口",
+        reasoning_tokens: 500,
+        thinking_ratio: null,
+        budget_windows: "预览示例窗口",
         tool_distribution: {
-          run_command: 722,
-          view_file: 418,
-          write_to_file: 152,
-          manage_task: 115,
-          search_web: 82,
-          replace_file_content: 75,
-          list_dir: 51,
-          grep_search: 39,
-          schedule: 25,
-          read_url_content: 24,
+          run_command: 10,
+          view_file: 7,
+          write_to_file: 4,
+          manage_task: 3,
+          search_web: 2,
+          replace_file_content: 2,
+          list_dir: 1,
+          grep_search: 1,
+          schedule: 1,
+          read_url_content: 1,
         },
-        top_sessions: [
-          { session_id: "95313478-594b-41d5-8f60-c14b525aceb0", title: "Token Ledger UI Redesign", tokens: 137881861, tool_calls: 805 },
-          { session_id: "a626b55f-4ae3-4723-b661-17938ab256ca", title: "Running DRadar Task Plan", tokens: 13251673, tool_calls: 108 },
-          { session_id: "cbb05db0-6b4a-4898-b85a-1b094d322b29", title: "CodexRadar Best Value Models", tokens: 12312482, tool_calls: 103 },
-          { session_id: "abb963e9-08bc-49c9-b88a-c35b03f04bd3", title: "手机存储状况分析与清理建议", tokens: 8915262, tool_calls: 133 },
-          { session_id: "bae876cb-3996-4065-8aad-37519650b0fd", title: "Huzhou D5000 System Upgrade", tokens: 6987201, tool_calls: 135 },
-          { session_id: "04d8d7f8-f159-430f-8993-e3e7d0027002", title: "Desktop Edge Bookmarks Generator", tokens: 6340595, tool_calls: 40 },
-          { session_id: "b7da5e99-e880-4121-bcc3-3701bea436a1", title: "Digital Garden Website Redesign", tokens: 3383586, tool_calls: 29 },
-          { session_id: "dc072cd8-9231-4352-89b3-6368ff2f0301", title: "Antigravity Token Usage Check", tokens: 3284679, tool_calls: 63 },
-        ],
+        top_sessions: [],
       },
       quota: {
-        status: "fresh",
-        label: "Gemini 每周限额",
-        remaining_percent: 86.8,
-        used_percent: 13.2,
-        window_minutes: 10080,
-        resets_at: "2026-09-11T00:14:22Z",
-        message: "您已使用了部分每周限额，它将在 4 天 11 小时后完全刷新",
+        status: "unavailable",
+        label: "预览未加载额度",
+        remaining_percent: null,
+        message: "预览模式未读取账户额度",
       },
-      quota_windows: [
-        {
-          status: "fresh",
-          label: "Gemini 每周限额",
-          remaining_percent: 86.8,
-          used_percent: 13.2,
-          window_minutes: 10080,
-          resets_at: "2026-09-11T00:14:22Z",
-          message: "您已使用了部分每周限额，它将在 4 天 11 小时后完全刷新",
-        },
-        {
-          status: "fresh",
-          label: "Gemini 5小时限额",
-          remaining_percent: 74.4,
-          used_percent: 25.6,
-          window_minutes: 300,
-          resets_at: "2026-09-06T15:39:27Z",
-          message: "您已使用了部分 5 小时限额，它将在 3 小时 17 分钟后完全刷新",
-        },
-        {
-          status: "fresh",
-          label: "Claude & GPT 每周限额",
-          remaining_percent: 100.0,
-          used_percent: 0.0,
-          window_minutes: 10080,
-          resets_at: "2026-09-13T12:21:37Z",
-          message: "Claude 和 GPT 模型共享每周限额",
-        },
-        {
-          status: "fresh",
-          label: "Claude & GPT 5小时限额",
-          remaining_percent: 100.0,
-          used_percent: 0.0,
-          window_minutes: 300,
-          resets_at: "2026-09-06T17:21:37Z",
-          message: "Claude 和 GPT 模型共享 5 小时限额",
-        },
-      ],
     },
   ];
 
@@ -365,8 +343,8 @@ function mockDashboard() {
   return {
     meta: {
       generated_at: new Date().toISOString(),
-      range: { start: daily[0].date, end: daily.at(-1).date, days: 30 },
-      scan: { status: "ready", progress: 100, message: "内置高保真预览数据", last_completed_at: new Date().toISOString() },
+      range: { start: daily[0].date, end: daily[daily.length - 1].date, days: 30 },
+      scan: { status: "ready", progress: 100, message: "内置合成示例数据（非本机记录）", last_completed_at: new Date().toISOString() },
       timezone: "Asia/Shanghai",
       selected_agent: "all",
     },
@@ -375,16 +353,18 @@ function mockDashboard() {
       reported_total: total,
       estimated_total: 0,
       contains_estimates: false,
-      input: 5393988578,
-      cached_input: 5197491273,
-      cache_write: 3100000,
-      output: 19180443,
-      reasoning: 6804016,
-      non_cached_input: 196497305,
-      net_usage: 215677748,
-      cache_hit_rate: 0.9636,
-      sessions: 72,
-      calls: 1400,
+      input: 113000,
+      cached_input: 87000,
+      cache_write: 0,
+      output: 8000,
+      reasoning: 1700,
+      non_cached_input: 26000,
+      net_usage: 34000,
+      cache_hit_rate: 0.7699,
+      sessions: 7,
+      calls: 29,
+      cost_known: false,
+      cost_cny_text: "未提供",
     },
     lifetime: {
       summary: {
@@ -392,32 +372,35 @@ function mockDashboard() {
         reported_total: total,
         estimated_total: 0,
         contains_estimates: false,
-        input: 6553746606,
-        cached_input: 6305002839,
-        output: 23168727,
-        net_usage: 271912494,
-        cache_hit_rate: 0.9620,
-        sessions: 72,
-        calls: 1400,
+        input: 146000,
+        cached_input: 112000,
+        output: 10000,
+        net_usage: 44000,
+        cache_hit_rate: 0.7671,
+        sessions: 9,
+        calls: 37,
+        cost_known: false,
+        cost_cny_text: "未提供",
+        has_unpriced_usage: true,
       },
       agents: Object.fromEntries(agents.map((agent) => [agent.id, agent])),
     },
     daily,
     agents,
     models: [
-      { agent: "codex", route: "原生订阅", platform: "OpenAI", model: "gpt-5.6-sol", total: 3802921609, share: 0.700, usage_mode: "reported" },
-      { agent: "codex", route: "原生订阅", platform: "OpenAI", model: "gpt-5.6-luna", total: 871529898, share: 0.160, usage_mode: "reported" },
-      { agent: "antigravity", route: "Google Antigravity 原生直连", platform: "Google DeepMind", model: "gemini-3.8-flash", total: 169684194, share: 0.0312, usage_mode: "reported" },
-      { agent: "claude", route: "CC Switch 账户日汇总", platform: "Zhipu GLM", model: "glm-5.3-flash", total: 60065461, share: 0.011, usage_mode: "reported" },
-      { agent: "claude", route: "CC Switch 账户日汇总", platform: "DeepSeek", model: "deepseek-v4-flash", total: 44523279, share: 0.008, usage_mode: "reported" },
-      { agent: "antigravity", route: "Google Antigravity 原生直连", platform: "Google DeepMind", model: "gemini-3.7-flash", total: 24856411, share: 0.0046, usage_mode: "reported" },
-      { agent: "antigravity", route: "Google Antigravity 原生直连", platform: "Google DeepMind", model: "gemini-3.7-flash-exp-b", total: 10870483, share: 0.002, usage_mode: "reported" },
+      { agent: "codex", route: "合成示例路由", platform: "示例平台", model: "example-model-a", total: 52000, share: 0.43, usage_mode: "preview", cost_known: false, cost_cny_text: "未提供" },
+      { agent: "codex", route: "合成示例路由", platform: "示例平台", model: "example-model-b", total: 20000, share: 0.17, usage_mode: "preview", cost_known: false, cost_cny_text: "未提供" },
+      { agent: "antigravity", route: "合成示例路由", platform: "示例平台", model: "example-model-c", total: 9000, share: 0.07, usage_mode: "preview", cost_known: false, cost_cny_text: "未提供" },
+      { agent: "claude", route: "合成示例路由", platform: "示例平台", model: "example-model-d", total: 8000, share: 0.07, usage_mode: "preview", cost_known: false, cost_cny_text: "未提供" },
+      { agent: "claude", route: "合成示例路由", platform: "示例平台", model: "example-model-e", total: 6000, share: 0.05, usage_mode: "preview", cost_known: false, cost_cny_text: "未提供" },
+      { agent: "antigravity", route: "合成示例路由", platform: "示例平台", model: "example-model-f", total: 5000, share: 0.04, usage_mode: "preview", cost_known: false, cost_cny_text: "未提供" },
+      { agent: "antigravity", route: "合成示例路由", platform: "示例平台", model: "example-model-g", total: 3000, share: 0.02, usage_mode: "preview", cost_known: false, cost_cny_text: "未提供" },
     ],
     sources: agents.map((agent, index) => ({
       agent: agent.id,
       status: agent.status,
       label: `${agent.name} 本地数据`,
-      path_hint: index === 2 ? "~/.gemini/antigravity/brain" : `~/.${agent.id}/sessions`,
+      path_hint: "预览示例数据源（未读取本机）",
       files: 12 + index * 8,
       events: agent.calls,
       sessions: agent.sessions,
@@ -568,11 +551,11 @@ function renderOverview(data) {
     || data.agents[0];
   const quota = quotaAgent?.quota;
   const quotaAvailable = quota && (quota.remaining_percent != null || quota.balance_text != null) && quota.status !== "unavailable";
-  const quotaPercent = quotaAvailable ? (absolutePercent(quota.remaining_percent) ?? (quota.balance_text ? 100 : null)) : null;
+  const quotaPercent = quotaAvailable ? absolutePercent(quota.remaining_percent) : null;
   const quotaValDisplay = quota?.balance_text
     ? quota.balance_text
     : (quotaAvailable ? formatPercent(quotaPercent) : "未下发");
-  const isHealthy = quotaAvailable && (quotaPercent == null || quotaPercent >= 20);
+  const isHealthy = quotaAvailable && quota.status === "fresh" && quotaPercent != null && quotaPercent >= 20;
 
   elements.overview.innerHTML = `
     <div class="overview-stack">
@@ -592,13 +575,12 @@ function renderOverview(data) {
           <div>
             <div class="kpi-value mono" title="${Number(lifetime.total || 0).toLocaleString("zh-CN")}">${compactNumber(lifetime.total)}</div>
             <div class="kpi-sub">
-              <span>精确：${Number(lifetime.total || 0).toLocaleString("zh-CN")}</span>
+              <span>已索引：${Number(lifetime.total || 0).toLocaleString("zh-CN")}</span>
               <span class="mono" style="color:#34D399;font-weight:600">${Number(lifetime.sessions || 0).toLocaleString("zh-CN")} 会话 · ${Number(lifetime.calls || 0).toLocaleString("zh-CN")} 请求</span>
             </div>
-            <div class="kpi-cost-badge" title="全周期累计消耗按公有云标准定价预估的等额商用价值">
-              <span>全周期等额价值:</span>
-              <strong style="color:var(--text-primary)">${(lifetime && lifetime.cost_cny_text) || data.summary.cost_cny_text || '¥0.00'}</strong>
-              <span style="opacity:0.8;font-weight:normal">(${ (lifetime && lifetime.cost_usd_text) || data.summary.cost_usd_text || '$0.00' })</span>
+            <div class="kpi-cost-badge" title="全周期用量的 API 参考估算">
+              <span>${costQualifier(lifetime)}:</span>
+              <strong style="color:var(--text-primary)">${escapeHtml(costInlineText(lifetime))}</strong>
             </div>
           </div>
           <div class="kpi-foot">
@@ -612,12 +594,12 @@ function renderOverview(data) {
           <div class="kpi-head">
             <span class="kpi-label">
               <span class="kpi-dot" style="background:#6366F1"></span>
-              范围实际净用量
-              <span class="kpi-info-icon" title="计算公式：实际净用量 = (总输入 − 缓存读取) + 模型输出&#10;由于编程智能体会把完整工程与历史上下文发给模型，其中超 96% 被缓存复用（免费或超低折扣），故净用量为您真正消耗/计费的有效 Token 基准。">
+              范围净用量
+              <span class="kpi-info-icon" title="计算公式：实际净用量 = (总输入 − 缓存读取) + 模型输出&#10;缓存读取与净用量均按本机日志中的结构化字段计算；缺失字段会标记为未提供。">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
               </span>
             </span>
-            <span class="pill-badge pill-badge--blue">计费核算基准</span>
+            <span class="pill-badge pill-badge--blue">净用量核算基准</span>
           </div>
           <div>
             <div class="kpi-value mono" style="color:#60A5FA" title="${Number(summary.net_usage || 0).toLocaleString("zh-CN")}">${compactNumber(summary.net_usage)}</div>
@@ -625,16 +607,10 @@ function renderOverview(data) {
               <span>原始输入：${compactNumber(summary.input)}</span>
               <span style="color:#34D399;font-weight:600">缓存减负 ${formatPercent(ratioToPercent(summary.cache_hit_rate))}</span>
             </div>
-            <div class="kpi-cost-badge" title="当前所选时间范围内的等额商用价值">
-              <span>区间等额价值:</span>
-              <strong style="color:var(--text-primary)">${data.summary.cost_cny_text || '¥0.00'}</strong>
-              <span style="opacity:0.8;font-weight:normal">(${data.summary.cost_usd_text || '$0.00'})</span>
+            <div class="kpi-cost-badge" title="当前所选时间范围内的 API 参考估算">
+              <span>${costQualifier(summary)}:</span>
+              <strong style="color:var(--text-primary)">${escapeHtml(costInlineText(summary))}</strong>
             </div>
-            ${data.summary.claude_benchmark ? `
-            <div class="claude-benchmark-badge" style="margin-top:6px;padding:4px 8px;background:rgba(249,115,22,0.08);border:1px dashed rgba(249,115,22,0.3);border-radius:8px;font-size:11px;color:var(--text-secondary);line-height:1.4" title="通过 CC Switch 中转调用智谱 GLM-Flash、DeepSeek-Flash 等极速模型，单价仅 0.1元/百万且享受 95%+ 缓存减负">
-              💡 经 CC Switch 走极速模型实付仅 <strong>${data.summary.cost_cny_text}</strong>；若运行于 <strong>Claude 3.5 Sonnet</strong> 官方原生约合 <strong>${data.summary.claude_benchmark.benchmark_cny_text}</strong> (${data.summary.claude_benchmark.benchmark_usd_text})，降本 <strong>${data.summary.claude_benchmark.saved_percent}%</strong>
-            </div>
-            ` : ''}
           </div>
           <div class="kpi-foot">
             <span style="color:#34D399;font-weight:500">已省缓存：${compactNumber(summary.cached_input)}</span>
@@ -649,7 +625,7 @@ function renderOverview(data) {
               <span class="kpi-dot" style="background:#10B981"></span>
               缓存命中效率
             </span>
-            <span class="pill-badge pill-badge--emerald">极优</span>
+            <span class="pill-badge pill-badge--emerald">读取比例</span>
           </div>
           <div>
             <div class="kpi-value mono" style="color:#34D399">${formatPercent(ratioToPercent(summary.cache_hit_rate))}</div>
@@ -676,8 +652,8 @@ function renderOverview(data) {
           </div>
           <div>
             <div style="display:flex;align-items:baseline;gap:8px">
-              <span class="kpi-value mono" style="color:${isHealthy ? '#34D399' : '#FBBF24'}">${quotaValDisplay}</span>
-              <span style="font-size:11px;color:${quotaAvailable ? (isHealthy ? '#34D399' : '#EF4444') : '#FBBF24'};font-weight:600">${quotaAvailable ? (isHealthy ? '额度充裕' : '额度紧张') : '第三方代理'}</span>
+              <span class="kpi-value mono" style="color:${isHealthy ? '#34D399' : '#FBBF24'}">${escapeHtml(quotaValDisplay)}</span>
+              <span style="font-size:11px;color:var(--text-secondary);font-weight:600">${quota?.status === 'stale' ? '旧快照' : (quotaAvailable ? (quotaPercent == null ? '余额快照' : '服务端快照') : '额度未知')}</span>
             </div>
             <div class="kpi-sub">
               <span>${quota?.message ? escapeHtml(quota.message) : (quotaAvailable ? escapeHtml(formatReset(quota?.resets_at)) : "服务商未返回结构化字段")}</span>
@@ -685,7 +661,7 @@ function renderOverview(data) {
             </div>
           </div>
           <div class="kpi-foot" style="border-top:none;padding-top:0">
-            <div class="progress-bar-bg">
+            <div class="progress-bar-bg" style="${quotaPercent == null ? 'display:none' : ''}">
               <div class="progress-bar-fill" style="background:${isHealthy ? '#10B981' : '#F59E0B'};width:${quotaPercent ?? 0}%"></div>
             </div>
           </div>
@@ -701,7 +677,7 @@ function renderOverview(data) {
               <span>Token 流量转换轨道</span>
               <span class="pill-badge pill-badge--blue" style="font-size:10px">Pipeline 流转模型</span>
             </h2>
-            <p>从上下文输入到缓存过滤，再到模型生成及最终有效计费净用量的全透明流转</p>
+            <p>从上下文输入到缓存过滤，再到模型生成及最终有效净用量的全透明流转</p>
           </div>
           <div class="flow-formula-badge">
             净用量 = (输入 − 缓存读取) + 输出
@@ -730,7 +706,7 @@ function renderOverview(data) {
                 <span class="pill-badge pill-badge--emerald mono">${formatPercent(ratioToPercent(summary.cache_hit_rate))} 减负</span>
               </div>
               <div class="flow-node-value mono" style="color:#34D399">${compactNumber(summary.cached_input)}</div>
-              <span class="flow-node-desc">本地/云端复用上下文，极低成本</span>
+                <span class="flow-node-desc">本地/云端复用上下文，减少重复输入</span>
             </div>
 
             <div class="flow-connector">
@@ -752,7 +728,7 @@ function renderOverview(data) {
 
             <div class="flow-node flow-node--net">
               <div class="flow-node-head">
-                <span class="flow-node-label" style="color:#60A5FA">4. 最终计费净用量</span>
+                <span class="flow-node-label" style="color:#60A5FA">4. 最终净用量</span>
                 <span class="pill-badge pill-badge--blue mono">核算基准</span>
               </div>
               <div class="flow-node-value mono" style="color:#60A5FA">${compactNumber(summary.net_usage)}</div>
@@ -904,7 +880,7 @@ function trendPanel(daily) {
                 <span id="tooltipOutput">—</span>
               </div>
               <div class="tooltip-row" style="color:#60A5FA;font-weight:600;padding-top:2px;border-top:1px dashed var(--border-subtle)">
-                <span>实际计费净用量:</span>
+                <span>实际净用量:</span>
                 <span id="tooltipNet">—</span>
               </div>
             </div>
@@ -926,7 +902,7 @@ function trendPanel(daily) {
             <div style="color:var(--text-secondary)">输入: <span id="inspectBarInput">${compactNumber(latest.input)}</span></div>
             <div style="color:#34D399">缓存: <span id="inspectBarCache">${compactNumber(latest.cached_input)}</span></div>
             <div style="color:#60A5FA;font-weight:600">净用量: <span id="inspectBarNet">${compactNumber(latest.net_usage || (latest.total - latest.cached_input))}</span></div>
-            <div style="color:#10B981;font-weight:600">等额价值: <span id="inspectBarCost">${latest.cost_cny_text || '¥0.00'}</span></div>
+            <div style="color:#10B981;font-weight:600">${costQualifier(latest)}: <span id="inspectBarCost">${escapeHtml(costInlineText(latest))}</span></div>
           </div>
         </div>
       </div>
@@ -1041,7 +1017,7 @@ function renderSplineChart(daily) {
       const ttDate = $("#tooltipDate");
       if (ttDate) ttDate.textContent = `${nearest.date}`;
       const ttTotal = $("#tooltipTotal");
-      if (ttTotal) ttTotal.textContent = `${Number(nearest.total || 0).toLocaleString("zh-CN")} Token${nearest.cost_cny_text ? ' (' + nearest.cost_cny_text + ')' : ''}`;
+      if (ttTotal) ttTotal.textContent = `${Number(nearest.total || 0).toLocaleString("zh-CN")} Token · ${costQualifier(nearest)} ${costInlineText(nearest)}`;
       const ttInput = $("#tooltipInput");
       if (ttInput) ttInput.textContent = Number(nearest.input || 0).toLocaleString("zh-CN");
       const ttCache = $("#tooltipCache");
@@ -1053,7 +1029,7 @@ function renderSplineChart(daily) {
 
       // Sync inspection bar
       const barDate = $("#inspectBarDate");
-      if (barDate) barDate.textContent = `${nearest.date} 单日精确账单`;
+      if (barDate) barDate.textContent = `${nearest.date} 单日用量统计`;
       const barTotal = $("#inspectBarTotal");
       if (barTotal) barTotal.textContent = Number(nearest.total || 0).toLocaleString("zh-CN");
       const barInput = $("#inspectBarInput");
@@ -1063,7 +1039,7 @@ function renderSplineChart(daily) {
       const barNet = $("#inspectBarNet");
       if (barNet) barNet.textContent = Number(netVal).toLocaleString("zh-CN");
       const barCost = $("#inspectBarCost");
-      if (barCost) barCost.textContent = nearest.cost_cny_text || '¥0.00';
+      if (barCost) barCost.textContent = costInlineText(nearest);
     });
   };
 
@@ -1107,9 +1083,8 @@ function rankingPanel(models, agents) {
         <div class="model-stat" style="text-align:right">
           <div class="model-stat-val mono">${compactNumber(model.total)}</div>
           <div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-top:2px">
-            <span class="model-cost-tag" title="基于官方当前公有云标准定价预估: ${escapeHtml(model.pricing_source || '公有云定价')}${model.unit_rate_text ? '&#10;计费标准: ' + escapeHtml(model.unit_rate_text) : ''}">
-              <span>${model.cost_cny_text || '¥0.00'}</span>
-              <span class="model-cost-usd">(${model.cost_usd_text || '$0.00'})</span>
+            <span class="model-cost-tag" title="${costQualifier(model)}${model.pricing_source ? ` · ${escapeHtml(model.pricing_source)}` : ""}${model.unit_rate_text ? '&#10;参考单价: ' + escapeHtml(model.unit_rate_text) : ''}">
+              ${costMarkup(model)}
             </span>
             <span class="model-stat-share mono">${formatPercent(ratioToPercent(model.share))}</span>
           </div>
@@ -1123,8 +1098,8 @@ function rankingPanel(models, agents) {
     <article class="glass-card ranking-panel">
       <div>
         <div class="ranking-head">
-          <h3>模型分布与费用估算</h3>
-          <span style="font-size:11px;color:var(--text-tertiary)">公有云等额价值</span>
+          <h3>模型分布与 API 参考估算</h3>
+          <span style="font-size:11px;color:var(--text-tertiary)">API 参考估算</span>
         </div>
 
         <div class="stacked-bar">
@@ -1136,15 +1111,9 @@ function rankingPanel(models, agents) {
         </div>
       </div>
 
-      ${state.agent === "claude" ? `
-      <div style="margin:12px 0 6px;padding:8px 12px;background:rgba(249,115,22,0.06);border:1px dashed rgba(249,115,22,0.25);border-radius:10px;font-size:11.5px;color:var(--text-secondary);line-height:1.45">
-        💡 <strong>Claude Code 计费说明</strong>：当前主要用量由 CC Switch 路由至国产极速模型（如智谱 GLM-5.3-Flash 官方单价仅 ¥0.10/M），加上 95%+ 上下文缓存减免，故公有云支出仅个位数人民币。
-      </div>
-      ` : ''}
-
       <div class="ranking-foot">
         <span>数据源可信度</span>
-        <span style="color:#34D399;font-weight:600">100% 结构化指纹比对 · 官方 API 市价估算</span>
+        <span style="color:#34D399;font-weight:600">已识别模型单价 · API 参考估算</span>
       </div>
     </article>
   `;
@@ -1159,13 +1128,13 @@ function agentCard(agent, lifetime = agent) {
   const hasAccountRollup = Boolean(
     agent.reconciliation?.has_account_rollup || lifetime?.reconciliation?.has_account_rollup
   );
-  const cacheHit = ratioToPercent(agent.cache_hit_rate) ?? 0;
+  const cacheHit = ratioToPercent(agent.cache_hit_rate);
   const isSpotlight = state.agent === agent.id;
   const isDimmed = state.agent !== "all" && state.agent !== agent.id;
   const isAntigravity = agent.id === "antigravity";
 
   const statusBadge = isAntigravity
-    ? `<span class="pill-badge pill-badge--purple" title="Google DeepMind 原生架构 · 1M 超长上下文 · 91.8% 缓存减负">DeepMind 3.8/3.7 · 1M 窗口</span>`
+    ? `<span class="pill-badge pill-badge--purple" title="Google DeepMind 原生架构 · 1M 超长上下文">DeepMind 模型分组 · 1M 窗口</span>`
     : `<span class="pill-badge ${estimated ? 'pill-badge--purple' : hasAccountRollup ? 'pill-badge--orange' : 'pill-badge--emerald'}">
         ${estimated ? "本地文本估算" : hasAccountRollup ? "已合并日汇总" : escapeHtml(statusText(agent.status))}
       </span>`;
@@ -1183,7 +1152,7 @@ function agentCard(agent, lifetime = agent) {
         </div>
         <div class="agent-metric-row">
           <span class="agent-metric-label">缓存命中率:</span>
-          <span style="font-weight:700;color:#34D399">${formatPercent(cacheHit)} (读取 ${compactNumber(agent.cached_input)})</span>
+          <span style="font-weight:700;color:#34D399">${cacheHit == null ? "未提供" : formatPercent(cacheHit)} (读取 ${compactNumber(agent.cached_input)})</span>
         </div>
         <div class="agent-metric-row">
           <span class="agent-metric-label">自主工具 / CoT:</span>
@@ -1199,7 +1168,7 @@ function agentCard(agent, lifetime = agent) {
         </div>
         <div class="agent-metric-row">
           <span class="agent-metric-label">缓存命中率:</span>
-          <span style="font-weight:600;color:${estimated ? 'var(--text-tertiary)' : '#34D399'}">${estimated ? "—" : formatPercent(cacheHit)}</span>
+          <span style="font-weight:600;color:${estimated || cacheHit == null ? 'var(--text-tertiary)' : '#34D399'}">${estimated || cacheHit == null ? "未提供" : formatPercent(cacheHit)}</span>
         </div>
         <div class="agent-metric-row">
           <span class="agent-metric-label">输出 / 推理:</span>
@@ -1290,8 +1259,8 @@ function renderCardQuota(agent) {
 
   const itemsHtml = cardWindows.map((quota, idx) => {
     const rawRemaining = quota.remaining_percent;
-    const remaining = absolutePercent(rawRemaining) ?? (quota.balance_text ? 100 : 0);
-    const isExhausted = remaining <= 0 && !quota.balance_text;
+    const remaining = absolutePercent(rawRemaining);
+    const isExhausted = remaining != null && remaining <= 0 && !quota.balance_text;
     const isWarning = remaining > 0 && remaining <= 25 && !quota.balance_text;
 
     let valColor = "#34D399";
@@ -1328,10 +1297,10 @@ function renderCardQuota(agent) {
             <span class="kpi-dot" style="background:${valColor};box-shadow:0 0 6px ${valColor}88"></span>
             ${escapeHtml(quota.label || "额度窗口")}
           </span>
-          <span class="agent-card-quota-percent" style="color:${valColor}">${valText}</span>
+          <span class="agent-card-quota-percent" style="color:${valColor}">${escapeHtml(valText)}${quota.status === 'stale' ? ' · 旧快照' : ''}</span>
         </div>
-        <div class="agent-card-quota-bar ${isExhausted ? 'is-exhausted' : ''}" title="${escapeHtml(quota.label || '')} ${valText}">
-          <div class="agent-card-quota-fill" style="width:${remaining}%;background:${barGradient};box-shadow:${barShadow}"></div>
+        <div class="agent-card-quota-bar ${isExhausted ? 'is-exhausted' : ''}" style="${remaining == null ? 'display:none' : ''}" title="${escapeHtml(quota.label || '')} ${escapeHtml(valText)}">
+          <div class="agent-card-quota-fill" style="width:${remaining ?? 0}%;background:${barGradient};box-shadow:${barShadow}"></div>
         </div>
         <div class="agent-card-quota-foot mono">
           <span class="agent-card-quota-meta" title="${escapeHtml(quota.message || '')} (服务端快照: ${formatDateTime(quota.updated_at)})">
@@ -1361,8 +1330,8 @@ function renderDetailQuotaWindows(focus, lastScan) {
         <span style="color:#FB923C;font-size:15px;line-height:1">⚡</span>
         <div>
           <strong style="color:var(--text-primary)">CC Switch 多模型源额度与通道状态：</strong>
-          当前系统生效路由为 <span class="pill-badge pill-badge--emerald" style="font-size:10px;vertical-align:middle;margin:0 2px">${escapeHtml(currentRoute?.name || 'DeepSeek')} (当前生效)</span>。
-          Token Ledger 自动同步 CC Switch 各上游服务商余额与通道可用性，方便您随时掌握各通道额度与充值状态。
+          当前系统生效路由为 <span class="pill-badge pill-badge--emerald" style="font-size:10px;vertical-align:middle;margin:0 2px">${escapeHtml(currentRoute?.name || '未识别')} (当前生效)</span>。
+          仅受支持的官方端点可查询余额；未获取数据不代表通道故障，余额也不代表剩余额度百分比。
         </div>
       </div>
     `;
@@ -1381,7 +1350,7 @@ function renderDetailQuotaWindows(focus, lastScan) {
         ? "linear-gradient(90deg, #10B981 0%, #34D399 100%)"
         : (isLimited ? "linear-gradient(90deg, #F59E0B 0%, #FBBF24 100%)" : "rgba(255,255,255,0.1)");
       let shadowBar = isAvailable ? "0 0 8px rgba(16,185,129,0.45)" : "none";
-      let barWidth = isAvailable ? (s.remaining_percent ?? 100) : (isLimited ? 25 : 0);
+      let barWidth = absolutePercent(s.remaining_percent);
 
       const linkHtml = s.website_url
         ? `<a href="${escapeHtml(s.website_url)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;color:#60A5FA;text-decoration:none;display:inline-flex;align-items:center;gap:3px">官网 / 控制台 ↗</a>`
@@ -1399,8 +1368,8 @@ function renderDetailQuotaWindows(focus, lastScan) {
               ${escapeHtml(s.balance_text || "—")}
             </span>
           </div>
-          <div class="progress-bar-bg" style="height:6px;border-radius:999px">
-            <div class="progress-bar-fill" style="background:${bgBar};width:${barWidth}%;box-shadow:${shadowBar}"></div>
+          <div class="progress-bar-bg" style="height:6px;border-radius:999px;${barWidth == null ? 'display:none' : ''}">
+            <div class="progress-bar-fill" style="background:${bgBar};width:${barWidth ?? 0}%;box-shadow:${shadowBar}"></div>
           </div>
           <div class="mono" style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-tertiary)">
             <span>${escapeHtml(s.message || '')}</span>
@@ -1441,7 +1410,7 @@ function renderDetailQuotaWindows(focus, lastScan) {
         <span style="color:#C084FC;font-size:14px;line-height:1">ℹ</span>
         <div>
           <strong style="color:var(--text-primary)">Antigravity 模型分组限额说明：</strong>
-          Gemini 模型与 Claude / GPT 模型分别共享其独立的每周限额与 5 小时限额。额度根据 Token 实际成本按比例扣除，5 小时限额平滑高频峰值，每周限额对应账号套餐周期。
+          按服务端返回的模型分组和窗口展示快照。未返回的窗口不推算；达到重置时间后等待新快照，不自行补满。
         </div>
       </div>
     `
@@ -1484,7 +1453,7 @@ function renderDetailQuotaWindows(focus, lastScan) {
             <span class="kpi-dot" style="background:${color};box-shadow:0 0 6px ${color}88"></span>
             ${escapeHtml(w.label || "官方额度窗口")}
           </span>
-          <span class="mono" style="font-weight:700;color:${color}">${valText}</span>
+          <span class="mono" style="font-weight:700;color:${color}">${escapeHtml(valText)}${w.status === 'stale' ? ' · 旧快照' : ''}</span>
         </div>
         <div class="progress-bar-bg" style="height:8px;border-radius:999px">
           <div class="progress-bar-fill" style="background:${bg};width:${remaining != null ? remaining : 0}%;box-shadow:${shadow}"></div>
@@ -1521,9 +1490,9 @@ function sourceStrip(data) {
         <div>
           <div class="hub-title-row">
             <span class="hub-title">${reported} 个结构化用量适配器 (Codex / Claude / Antigravity)${estimated ? ` · ${estimated} 个本地估算源` : ""}</span>
-            <span class="pill-badge pill-badge--emerald">100% 本地隐私审计</span>
+            <span class="pill-badge pill-badge--emerald">本地索引 · 个人数据</span>
           </div>
-          <div class="hub-subtitle">全本地日志指纹智能比对 · 自动过滤提示词与敏感密钥 · 绝不混淆真实计费</div>
+          <div class="hub-subtitle">全本地日志指纹智能比对 · 自动过滤提示词与敏感密钥 · 费用仅作 API 参考估算</div>
         </div>
       </div>
       <div class="hub-status-right">
@@ -1667,20 +1636,20 @@ function renderDetail(data) {
         <article class="glass-card" style="padding:24px">
           <div style="margin-bottom:14px">
             <h3 style="font-size:16px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
-              <span>防重计费与多源审计原则</span>
-              <span class="pill-badge pill-badge--emerald">审计健全</span>
+              <span>防重用量与多源审计原则</span>
+            <span class="pill-badge pill-badge--emerald">结构化字段检查</span>
             </h3>
-            <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">规避多端重复计算，确保账本精确性。</p>
+            <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">匹配覆盖范围后对账；身份未知记录保留，可能重叠。</p>
           </div>
 
           <div style="display:flex;flex-direction:column;gap:10px;font-size:12px;color:var(--text-secondary)">
             <div style="padding:12px;border-radius:8px;background:var(--bg-subtle);border:1px solid var(--border-subtle)">
               <strong style="color:var(--text-primary)">CC Switch 历史日汇总合并：</strong>
-              <p style="margin-top:4px">同一天内若同时发现账户日汇总与本机会话日志，账本以账户日汇总为准累加，本地会话仅作明细诊断，防止额度翻倍虚标。</p>
+            <p style="margin-top:4px">当同一天内同时发现账户日汇总与本机会话日志时，界面按来源标记展示，并将明细作为诊断参考，避免重复呈现。</p>
             </div>
             <div style="padding:12px;border-radius:8px;background:var(--bg-subtle);border:1px solid var(--border-subtle)">
               <strong style="color:var(--text-primary)">Antigravity DeepMind 深度解析架构：</strong>
-              <p style="margin-top:4px">从 transcript_full.jsonl 和本地 conversations.db 原生 Protobuf 中提取真实模型（Gemini 3.8 Flash、3.7 Flash）、10 大自主工具调用及思维链推理 (CoT)。全本地只读解析，绝不上传源码或 Prompt。</p>
+              <p style="margin-top:4px">从本地会话索引与结构化字段中提取模型、工具调用及推理统计。全本地只读解析，绝不上传源码或 Prompt。</p>
             </div>
           </div>
         </article>
@@ -1704,15 +1673,15 @@ function renderDetail(data) {
 
   const jumpCodex = $("#btnJumpCodex");
   if (jumpCodex) jumpCodex.addEventListener("click", () => {
-    $("#section-codex")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollToSection($("#section-codex"));
   });
   const jumpClaude = $("#btnJumpClaude");
   if (jumpClaude) jumpClaude.addEventListener("click", () => {
-    $("#section-claude")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollToSection($("#section-claude"));
   });
   const jumpAg = $("#btnJumpAntigravity");
   if (jumpAg) jumpAg.addEventListener("click", () => {
-    $("#section-antigravity")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    scrollToSection($("#section-antigravity"));
   });
 }
 
@@ -1723,9 +1692,9 @@ function renderCodexSection(codex, data) {
     .sort((a, b) => b.total - a.total);
 
   const fallbackModels = [
-    { model: "gpt-4o", total: 4215000, input: 3200000, cached_input: 1800000, output: 1015000, cost_cny_text: "¥89.42", cost_usd_text: "$12.42", route: "OpenAI 原生", platform: "OpenAI" },
-    { model: "o3-mini", total: 1840000, input: 1200000, cached_input: 800000, output: 640000, cost_cny_text: "¥26.78", cost_usd_text: "$3.72", route: "OpenAI 原生", platform: "OpenAI" },
-    { model: "o1", total: 950000, input: 600000, cached_input: 300000, output: 350000, cost_cny_text: "¥201.60", cost_usd_text: "$28.00", route: "OpenAI 原生", platform: "OpenAI" },
+    { model: "example-model-a", total: 5200, input: 3900, cached_input: 2100, output: 1300, cost_known: false, cost_cny_text: "未提供", route: "合成示例路由", platform: "示例平台" },
+    { model: "example-model-b", total: 2300, input: 1700, cached_input: 900, output: 600, cost_known: false, cost_cny_text: "未提供", route: "合成示例路由", platform: "示例平台" },
+    { model: "example-model-c", total: 1100, input: 800, cached_input: 400, output: 300, cost_known: false, cost_cny_text: "未提供", route: "合成示例路由", platform: "示例平台" },
   ];
   const displayModels = codexModels.length > 0 ? codexModels : fallbackModels;
 
@@ -1743,9 +1712,8 @@ function renderCodexSection(codex, data) {
               <span class="ag-model-role">OpenAI 编码与工程架构</span>
             </div>
           </div>
-          <span class="model-cost-tag" title="当前模型公有云等额价值">
-            <span>${m.cost_cny_text || '¥0.00'}</span>
-            <span class="model-cost-usd">(${m.cost_usd_text || '$0.00'})</span>
+          <span class="model-cost-tag" title="${costQualifier(m)}">
+            ${costMarkup(m)}
           </span>
         </div>
         <div class="ag-model-body">
@@ -1768,7 +1736,7 @@ function renderCodexSection(codex, data) {
           </div>
           <div class="mono" style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-tertiary);margin-top:6px">
             <span>算力占比: ${sharePercent}</span>
-            <span>~/.codex/sessions 结构化日志提取</span>
+            <span>本地结构化会话索引</span>
           </div>
         </div>
       </article>
@@ -1785,7 +1753,7 @@ function renderCodexSection(codex, data) {
               <h2 class="panorama-title">OpenAI Codex 架构解析与模型矩阵</h2>
               <span class="pill-badge pill-badge--blue">代码工程交互</span>
             </div>
-            <p class="panorama-subtitle">会话日志来自 ~/.codex/sessions，基于 last_token_usage 增量防重算法核算净消耗与限额窗口</p>
+            <p class="panorama-subtitle">会话日志来自本地结构化索引，基于增量字段核对净用量与限额窗口</p>
           </div>
         </div>
         <div style="display:flex;gap:8px">
@@ -1814,7 +1782,7 @@ function renderCodexSection(codex, data) {
             <h4 style="font-size:14px;font-weight:700;color:var(--text-primary)">Prompt Cache 智能减负分析</h4>
           </div>
           <p style="font-size:12px;color:var(--text-secondary);line-height:1.5">
-            在多轮代码编辑与长上下文会话中，Codex 命中的缓存 Token 享受高达 50%～90% 的价格优惠。Token 账本将其单独剥离并计算净用量，呈现真实的本地算力价值。
+            在多轮代码编辑与长上下文会话中，Codex 命中的缓存 Token 会被单独记录。Token 账本将其从输入中剥离并计算净用量，帮助核对本地用量结构。
           </p>
         </div>
       </div>
@@ -1829,9 +1797,9 @@ function renderClaudeSection(claude, data) {
     .sort((a, b) => b.total - a.total);
 
   const fallbackModels = [
-    { model: "deepseek-chat", total: 3824000, input: 2900000, cached_input: 2100000, output: 924000, cost_cny_text: "¥2.65", cost_usd_text: "$0.37", route: "CC Switch 路由", platform: "DeepSeek" },
-    { model: "claude-3-7-sonnet", total: 1200000, input: 900000, cached_input: 600000, output: 300000, cost_cny_text: "¥38.88", cost_usd_text: "$5.40", route: "CC Switch 路由", platform: "Anthropic" },
-    { model: "glm-4-plus", total: 450000, input: 350000, cached_input: 150000, output: 100000, cost_cny_text: "¥3.75", cost_usd_text: "$0.52", route: "CC Switch 路由", platform: "智谱开放平台" },
+    { model: "example-model-d", total: 4100, input: 3000, cached_input: 1600, output: 1100, cost_known: false, cost_cny_text: "未提供", route: "合成示例路由", platform: "示例平台" },
+    { model: "example-model-e", total: 1900, input: 1400, cached_input: 700, output: 500, cost_known: false, cost_cny_text: "未提供", route: "合成示例路由", platform: "示例平台" },
+    { model: "example-model-f", total: 900, input: 700, cached_input: 300, output: 200, cost_known: false, cost_cny_text: "未提供", route: "合成示例路由", platform: "示例平台" },
   ];
   const displayModels = claudeModels.length > 0 ? claudeModels : fallbackModels;
 
@@ -1849,9 +1817,8 @@ function renderClaudeSection(claude, data) {
               <span class="ag-model-role">${escapeHtml(m.route || "CC Switch 路由")} · ${escapeHtml(m.platform || "三方网关")}</span>
             </div>
           </div>
-          <span class="model-cost-tag" title="当前模型公有云等额价值">
-            <span>${m.cost_cny_text || '¥0.00'}</span>
-            <span class="model-cost-usd">(${m.cost_usd_text || '$0.00'})</span>
+          <span class="model-cost-tag" title="${costQualifier(m)}">
+            ${costMarkup(m)}
           </span>
         </div>
         <div class="ag-model-body">
@@ -1912,11 +1879,11 @@ function renderClaudeSection(claude, data) {
               <h2 class="panorama-title">Claude Code & CC Switch 多路由全景看板</h2>
               <span class="pill-badge pill-badge--amber">多供应商路由</span>
             </div>
-            <p class="panorama-subtitle">自动读取 ~/.cc-switch/cc-switch.db 路由数据库，实时安全轮询 DeepSeek 等官方真实余额</p>
+            <p class="panorama-subtitle">读取 CC Switch 本地路由数据，展示数据源提供的账户状态字段</p>
           </div>
         </div>
         <div style="display:flex;gap:8px">
-          <span class="pill-badge pill-badge--emerald">对账健全</span>
+          <span class="pill-badge pill-badge--emerald">来源字段已检查</span>
           <span class="pill-badge pill-badge--amber">净用量: ${compactNumber(claude.net_usage)} Tokens</span>
         </div>
       </div>
@@ -1928,7 +1895,7 @@ function renderClaudeSection(claude, data) {
       <!-- CC Switch Providers Cards Grid -->
       <div style="margin-top:10px">
         <h4 style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:12px;display:flex;align-items:center;gap:8px">
-          <span>CC Switch 供应商路由与实时余额状态</span>
+          <span>CC Switch 供应商路由与账户状态</span>
           <span class="pill-badge pill-badge--purple">自动安全轮询</span>
         </h4>
         <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:12px">
@@ -1943,16 +1910,16 @@ function renderClaudeSection(claude, data) {
             <h4 style="font-size:14px;font-weight:700;color:var(--text-primary)">大值保全对账原则</h4>
           </div>
           <p style="font-size:12px;color:var(--text-secondary);line-height:1.5">
-            当同一天内同时发现 CC Switch 账户日汇总与本机会话日志时，账本智能取两者的<strong>最大值累加</strong>，既防止外部平台调用丢失，又杜绝了重复计算导致的额度虚标。
+            当同一天内同时发现 CC Switch 账户日汇总与本机会话日志时，账本按数据源标记展示；账户汇总和本地会话明细分别保留，便于人工核对来源。
           </p>
         </div>
         <div class="glass-card" style="padding:20px">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
             <span class="status-dot" style="background:#F59E0B"></span>
-            <h4 style="font-size:14px;font-weight:700;color:var(--text-primary)">实时余额安全轮询与降级</h4>
+            <h4 style="font-size:14px;font-weight:700;color:var(--text-primary)">账户状态读取与降级</h4>
           </div>
           <p style="font-size:12px;color:var(--text-secondary);line-height:1.5">
-            针对当前激活的 DeepSeek 路由，后台通过官方余额 API 安全获取实时金额，具备 30s 内存 TTL 缓存及 2.5s 超时平滑降级，断网或无响应时不卡顿、不影响界面渲染。
+            若数据源提供余额字段，界面按响应展示；字段缺失或暂不可用时标记为“未配置”，不影响其余本地索引内容渲染。
           </p>
         </div>
       </div>
@@ -1975,9 +1942,9 @@ function renderAntigravitySection(ag, data) {
     .sort((a, b) => b.total - a.total);
 
   const fallbackModels = [
-    { model: "gemini-3.8-flash", total: 169684194, route: "Google Antigravity 原生直连", platform: "Google DeepMind" },
-    { model: "gemini-3.7-flash", total: 24856411, route: "Google Antigravity 原生直连", platform: "Google DeepMind" },
-    { model: "gemini-3.7-flash-exp-b", total: 10870483, route: "Google Antigravity 原生直连", platform: "Google DeepMind" },
+    { model: "example-model-g", total: 3900, route: "合成示例路由", platform: "示例平台" },
+    { model: "example-model-h", total: 2100, route: "合成示例路由", platform: "示例平台" },
+    { model: "example-model-i", total: 1200, route: "合成示例路由", platform: "示例平台" },
   ];
   const displayModels = agModels.length > 0 ? agModels : fallbackModels;
 
@@ -1990,7 +1957,7 @@ function renderAntigravitySection(ag, data) {
       dotColor: "#8B5CF6",
       role: "DeepMind 新一代主力 Agent 架构 · 自主规划与深度推理",
       position: "Antigravity 默认核心模型，接管多步任务规划 (PLANNER_RESPONSE)、系统级工具调度与复杂代码生成",
-      speed: "1,000,000 原生窗口 · 91.8% 缓存减负",
+      speed: "1,000,000 原生窗口 · 缓存字段按数据源提供",
       barColor: "#8B5CF6",
     },
     "gemini-3.7-flash": {
@@ -2110,12 +2077,12 @@ function renderAntigravitySection(ag, data) {
             <h2 style="font-size:17px;font-weight:700;color:var(--text-primary)">Google DeepMind Antigravity · Agentic 深度工程明细</h2>
           </div>
           <p style="font-size:12px;color:var(--text-secondary);margin-top:4px">
-            直接解析本地 <code class="mono" style="padding:1px 5px;background:var(--bg-subtle);border-radius:4px;color:#C084FC">~/.gemini/antigravity</code> 真实会话日志与 SQLite 原生 Protobuf，真实披露 Gemini 3.8 / 3.7 Flash 模型用量、10 大自主工具矩阵及真实工程项目。
+            解析本地 Agent 会话日志与 SQLite 原生 Protobuf；模型用量、工具矩阵与会话摘要仅在数据源提供时展示。
           </p>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
           <span class="pill-badge pill-badge--purple">Gemini 3.8 / 3.7 Flash 核心架构</span>
-          <span class="pill-badge pill-badge--blue">1M 原生超长上下文 (91.8% 缓存减负)</span>
+          <span class="pill-badge pill-badge--blue">1M 原生超长上下文</span>
           <span class="pill-badge pill-badge--emerald">${Number(totalTools || 0).toLocaleString("zh-CN")} 次自主工具调度</span>
           <span class="pill-badge pill-badge--purple">DeepMind 原生直连解析</span>
         </div>
@@ -2131,11 +2098,11 @@ function renderAntigravitySection(ag, data) {
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
           <div>
             <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
-              <span>10 大自主 Agentic 工具调用全量矩阵</span>
+              <span>本地可见工具调用统计</span>
               <span class="pill-badge pill-badge--emerald mono">${Number(totalTools || 0).toLocaleString("zh-CN")} 次累计调度</span>
             </h3>
             <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">
-              Antigravity 具有原生终端与系统级权限，各工具调用频次精确统计：
+              以下为已读取日志中的工具调用频次，不代表全部活动或计费记录：
             </p>
           </div>
           <span style="font-size:11px;color:var(--text-tertiary)">按调用次数排序</span>
@@ -2169,30 +2136,30 @@ function renderAntigravitySection(ag, data) {
         </div>
       </article>
 
-      <!-- Part 3: Real Projects / Sessions Top Ranking -->
+      <!-- Part 3: Redacted Sessions Top Ranking -->
       <article class="glass-card" style="padding:22px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px">
           <div>
             <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
-              <span>真实工程项目会话主题与用量明细 (TOP 8 会话)</span>
+              <span>会话摘要与用量明细 (TOP 8 会话)</span>
               <span class="pill-badge pill-badge--purple">Protobuf 深度还原</span>
             </h3>
             <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">
-              提取自本地工程会话概要数据库，清晰展示您近期由 Antigravity 承接的具体工程项目与真实消耗：
+              若数据源提供会话摘要，则展示脱敏后的用量信息：
             </p>
           </div>
-          <span style="font-size:11px;color:var(--text-tertiary)">非匿名 UUID · 真实工程可追溯</span>
+          <span style="font-size:11px;color:var(--text-tertiary)">会话标识已脱敏</span>
         </div>
 
         <div class="ag-sessions-grid">
-          ${topSessions
-            .map((s, idx) => {
-              const shortId = (s.session_id || "").slice(0, 8);
+          ${topSessions.length === 0
+            ? '<div style="padding:16px;text-align:center;color:var(--text-tertiary)">暂无可显示的会话摘要（预览示例已脱敏）</div>'
+            : topSessions.map((s, idx) => {
               return `
               <div class="ag-session-item">
                 <div class="ag-session-head">
                   <span class="ag-session-rank mono">#0${idx + 1}</span>
-                  <div class="ag-session-title" title="${escapeHtml(s.title || s.session_id)}">${escapeHtml(s.title || s.session_id)}</div>
+                  <div class="ag-session-title">已脱敏会话 ${idx + 1}</div>
                 </div>
                 <div class="ag-session-metrics mono">
                   <div class="ag-session-stat">
@@ -2203,15 +2170,10 @@ function renderAntigravitySection(ag, data) {
                     <span style="color:var(--text-tertiary)">自主工具</span>
                     <strong style="color:#34D399">${Number(s.tool_calls || 0).toLocaleString("zh-CN")} 次</strong>
                   </div>
-                  <div class="ag-session-stat">
-                    <span style="color:var(--text-tertiary)">会话标识</span>
-                    <span class="mono" style="color:var(--text-secondary);font-size:11px">${shortId}…</span>
-                  </div>
                 </div>
               </div>
             `;
-            })
-            .join("")}
+            }).join("")}
         </div>
       </article>
 
@@ -2249,7 +2211,7 @@ function renderDiagnostics(data) {
             <span class="pill-badge pill-badge--emerald">增量模式</span>
           </div>
           <div style="font-size:12px;color:var(--text-secondary);margin-top:4px">
-            数据库存储：<code class="mono" style="padding:2px 6px;border-radius:4px;background:var(--bg-subtle);color:var(--text-primary)">%LOCALAPPDATA%\\TokenLedger\\token-ledger.db</code>
+            数据库存储：<code class="mono" style="padding:2px 6px;border-radius:4px;background:var(--bg-subtle);color:var(--text-primary)">本机应用数据目录（路径已隐藏）</code>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:16px">
@@ -2279,7 +2241,7 @@ function renderDiagnostics(data) {
                 </span>
               </div>
               <div class="adapter-details">
-                <div>路径: <code>${escapeHtml(src.path_hint)}</code></div>
+                <div>来源: <code>本地索引（路径已隐藏）</code></div>
                 <div>发现文件: <strong>${src.files}</strong> 个文件</div>
                 <div>已入库用量: <strong>${src.events}</strong> 条有效事件</div>
               </div>
@@ -2484,7 +2446,7 @@ function setupAgentPills() {
       if (state.tab === "detail" && agent !== "all") {
         const targetSection = document.getElementById(`section-${agent}`);
         if (targetSection) {
-          targetSection.scrollIntoView({ behavior: "smooth", block: "start" });
+          scrollToSection(targetSection);
         }
       }
 
@@ -2498,87 +2460,15 @@ function setupAgentPills() {
    Smooth Inertial Wheel Scrolling Engine (Silky 120 FPS Glide for Windows)
    ========================================================================== */
 function initSmoothScroll() {
-  let isScrolling = false;
-  let currentY = window.pageYOffset;
-  let targetY = window.pageYOffset;
-  let lastTime = performance.now();
-  const docEl = document.documentElement;
-
-  // Modern physics glide for 120 FPS high-refresh displays
-  window.addEventListener(
-    "wheel",
-    (e) => {
-      // Allow browser zoom (Ctrl+wheel) and horizontal scrolling
-      if (e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-
-      e.preventDefault();
-
-      // Normalize wheel delta across mouse models & browser modes
-      let delta = e.deltaY;
-      if (e.deltaMode === 1) {
-        // Line mode
-        delta *= 38;
-      } else if (e.deltaMode === 2) {
-        // Page mode
-        delta *= window.innerHeight;
-      } else {
-        // Pixel mode (Windows notched wheel sends ~100 or ~120)
-        if (Math.abs(delta) >= 80) {
-          delta = Math.sign(delta) * (Math.abs(delta) * 1.15 + 20);
-        }
-      }
-
-      const maxScroll = Math.max(0, docEl.scrollHeight - window.innerHeight);
-      targetY = Math.max(0, Math.min(maxScroll, targetY + delta));
-
-      if (!isScrolling) {
-        currentY = window.pageYOffset;
-        isScrolling = true;
-        lastTime = performance.now();
-        requestAnimationFrame(smoothStep);
-      }
-    },
-    { passive: false }
-  );
-
-  function smoothStep(now) {
-    if (!isScrolling) return;
-    const dt = Math.min((now - lastTime) / 1000, 0.05); // seconds, capped at 50ms
-    lastTime = now;
-
-    const diff = targetY - currentY;
-    if (Math.abs(diff) < 0.4) {
-      currentY = targetY;
-      window.scrollTo(0, currentY);
-      isScrolling = false;
-      return;
-    }
-
-    // Frame-rate independent exponential decay (buttery-smooth at 60Hz, 120Hz, 144Hz, 240Hz)
-    const factor = 1 - Math.exp(-11.5 * dt);
-    currentY += diff * factor;
-    window.scrollTo(0, currentY);
-
-    requestAnimationFrame(smoothStep);
-  }
-
-  // Synchronize when scrolled by scrollbar or anchor links
-  window.addEventListener(
-    "scroll",
-    () => {
-      if (!isScrolling) {
-        currentY = window.pageYOffset;
-        targetY = window.pageYOffset;
-      }
-    },
-    { passive: true }
-  );
+  // Keep native wheel/scrollbar behavior so nested overflow regions, browser
+  // zoom, keyboard scrolling, and assistive technology retain control.
 }
 
 /* ==========================================================================
    3D Tilt & Specular Glare Effect (From Digital Garden Architecture)
    ========================================================================== */
 function setupTiltCards() {
+  if (prefersReducedMotion()) return;
   const cards = document.querySelectorAll(".tilt-card, .glass-card");
   cards.forEach((card) => {
     if (card._hasTiltAttached) return;
@@ -2635,6 +2525,10 @@ function setupTiltCards() {
 function initParticleCanvas() {
   const canvas = document.getElementById("ambient-particle-canvas");
   if (!canvas) return;
+  if (prefersReducedMotion()) {
+    canvas.hidden = true;
+    return;
+  }
   const ctx = canvas.getContext("2d");
   let w = 0, h = 0;
   let mouseX = -1000, mouseY = -1000;

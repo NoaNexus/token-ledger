@@ -7,8 +7,8 @@ from tokenledger import native
 
 
 def test_native_number_and_percent_formatting() -> None:
-    assert native.compact_number(333_334_232) == "3.33 亿"
-    assert native.compact_number(372_311) == "37.23 万"
+    assert native.compact_number(321_000_123) == "3.21 亿"
+    assert native.compact_number(543_210) == "54.32 万"
     assert native.compact_number(999) == "999"
     assert native.percent(native.ratio_percent(0.9136)) == "91.4%"
     assert native.percent(None) == "未提供"
@@ -67,4 +67,3 @@ def test_apply_window_theme_dark_and_light() -> None:
     assert native.apply_window_theme(0, is_dark=True) is False
     assert native.apply_window_theme(0, is_dark=False) is False
     assert native.apply_dark_titlebar(0) is False
-

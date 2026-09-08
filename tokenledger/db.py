@@ -82,7 +82,6 @@ CREATE TABLE IF NOT EXISTS app_meta (
 );
 """
 
-
 class TokenDatabase:
     def __init__(self, path: Path):
         self.path = path
@@ -105,14 +104,24 @@ class TokenDatabase:
                 connection.execute(
                     "ALTER TABLE usage_events ADD COLUMN call_count INTEGER NOT NULL DEFAULT 1"
                 )
+            # Discard legacy derived metadata, not usage history. Older releases
+            # persisted conversation titles and fabricated quota fallbacks.
+            if not connection.execute("SELECT 1 FROM app_meta WHERE key='migration:2.4.3'").fetchone():
+                connection.execute("PRAGMA secure_delete=ON")
+                connection.execute("DELETE FROM quota_snapshots WHERE agent IN ('claude','antigravity')")
+                connection.execute("UPDATE provider_states SET metadata_json='{}' WHERE agent IN ('claude','antigravity')")
+                connection.execute("INSERT INTO app_meta(key,value) VALUES('migration:2.4.3','1')")
 
-    def data_version(self) -> int:
-        try:
-            with self.connect() as connection:
-                row = connection.execute("PRAGMA data_version").fetchone()
-                return int(row[0]) if row else 0
-        except Exception:
-            return 0
+    def data_version(self) -> tuple:
+        # PRAGMA data_version cannot be compared across newly opened connections.
+        signatures = []
+        for path in (self.path, Path(str(self.path) + "-wal")):
+            try:
+                stat = path.stat()
+                signatures.append((stat.st_mtime_ns, stat.st_size))
+            except OSError:
+                signatures.append(None)
+        return tuple(signatures)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -229,10 +238,14 @@ class TokenDatabase:
                 )
         self._internal_version += 1
 
-    def save_quotas(self, quotas: Sequence[QuotaSnapshot]) -> None:
-        if not quotas:
+    def save_quotas(self, quotas: Sequence[QuotaSnapshot], *, replace_agent: str | None = None) -> None:
+        if replace_agent is not None and any(q.agent != replace_agent for q in quotas):
+            raise ValueError("Quota replacement must contain only the selected agent")
+        if not quotas and replace_agent is None:
             return
         with self.connect() as connection:
+            if replace_agent is not None:
+                connection.execute("DELETE FROM quota_snapshots WHERE agent=?", (replace_agent,))
             for quota in quotas:
                 connection.execute(
                     """

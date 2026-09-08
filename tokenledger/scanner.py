@@ -88,14 +88,15 @@ class ScanCoordinator:
             seen_ids: set[str] = set()
             adapter_errors = 0
             for discovered in discovered_files:
+                file_id = stable_id(agent, str(discovered.path.resolve()).lower())
+                seen_ids.add(file_id)
                 try:
                     stat = discovered.path.stat()
                 except OSError:
                     total_errors += 1
+                    adapter_errors += 1
                     processed += 1
                     continue
-                file_id = stable_id(agent, str(discovered.path.resolve()).lower())
-                seen_ids.add(file_id)
                 signature = (stat.st_mtime_ns, stat.st_size)
                 if (
                     force
@@ -114,6 +115,19 @@ class ScanCoordinator:
                             parsed,
                             utc_now(),
                         )
+                        # Some adapters derive their parse result from files
+                        # that are not themselves the discovered file (for
+                        # example an Antigravity conversation DB/WAL).  Let
+                        # those adapters commit their dependency fingerprint
+                        # only after the parsed result has been persisted.
+                        mark_parsed = getattr(adapter, "mark_parsed", None)
+                        if callable(mark_parsed):
+                            try:
+                                mark_parsed(discovered)
+                            except OSError:
+                                # A fingerprinting failure is non-fatal; the
+                                # next scan should simply parse again.
+                                pass
                         total_changed += 1
                     except (OSError, PermissionError, ValueError) as error:
                         total_errors += 1
@@ -136,7 +150,7 @@ class ScanCoordinator:
             self.database.remove_missing_files(agent, seen_ids)
             probe = adapter.probe()
             self.database.update_provider(agent, probe, utc_now())
-            if isinstance(probe.metadata, dict) and probe.metadata.get("budget_windows"):
+            if isinstance(probe.metadata, dict) and isinstance(probe.metadata.get("budget_windows"), list):
                 def _safe_float(val: Any) -> float | None:
                     try:
                         return float(val) if val is not None else None
@@ -154,7 +168,7 @@ class ScanCoordinator:
                         snapshot_id=str(w.get("snapshot_id") or f"{agent}:{w.get('label')}"),
                         agent=agent,
                         label=str(w.get("label", "")),
-                        status=str(w.get("status", "fresh")),
+                        status=str(w.get("status", "unavailable")),
                         remaining_percent=_safe_float(w.get("remaining_percent")),
                         used_percent=_safe_float(w.get("used_percent")),
                         window_minutes=_safe_int(w.get("window_minutes")),
@@ -163,10 +177,9 @@ class ScanCoordinator:
                         message=str(w.get("message", "")),
                     )
                     for w in probe.metadata["budget_windows"]
-                    if w.get("remaining_percent") is not None
+                    if isinstance(w, dict)
                 ]
-                if snapshots:
-                    self.database.save_quotas(snapshots)
+                self.database.save_quotas(snapshots, replace_agent=agent)
             if not adapter_errors:
                 self.database.set_meta(revision_key, parser_revision)
 

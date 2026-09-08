@@ -6,54 +6,61 @@ import sys
 import threading
 import time
 import traceback
-import urllib.request
-from pathlib import Path
 
 # Enable high refresh rate & GPU rasterization flags for Chromium inside Qt WebEngine
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = (
-    "--enable-gpu-rasterization "
-    "--enable-features=CanvasOopRasterization"
+os.environ.setdefault(
+    "QTWEBENGINE_CHROMIUM_FLAGS",
+    "--enable-gpu-rasterization --enable-features=CanvasOopRasterization",
 )
 
 from .config import AppConfig, default_data_dir, default_user_home, resource_root
 from .db import TokenDatabase
-from .native import (
-    APP_NAME,
-    acquire_single_instance,
-    activate_existing_window,
-    apply_dark_titlebar,
-    apply_window_theme,
-    migrate_legacy_database,
-    release_single_instance,
-)
+from .native import acquire_single_instance, activate_existing_window, apply_window_theme, migrate_legacy_database, release_single_instance
 from .providers import AntigravityAdapter, ClaudeAdapter, CodexAdapter
 from .scanner import ScanCoordinator
-from .api import TokenLedgerServer
+from .api import bind_local_server, local_server_url
 
 
-def _free_port_if_stale(port: int = 8765) -> None:
-    """If port is occupied by an unresponsive/zombie process, terminate it to unblock binding."""
-    try:
-        import psutil
+def _fit_window_geometry(
+    available_x: int,
+    available_y: int,
+    available_width: int,
+    available_height: int,
+    *,
+    margin: int = 24,
+    max_width: int = 1440,
+    max_height: int = 920,
+) -> tuple[int, int, int, int]:
+    """Center a window inside the monitor's work area (which excludes the taskbar)."""
+    width = min(max_width, max(1, available_width - margin * 2))
+    height = min(max_height, max(1, available_height - margin * 2))
+    x = available_x + max(0, (available_width - width) // 2)
+    y = available_y + max(0, (available_height - height) // 2)
+    return x, y, width, height
 
-        current_pid = os.getpid()
-        for conn in psutil.net_connections(kind="inet"):
-            if conn.laddr and conn.laddr.port == port and conn.status == psutil.CONN_LISTEN:
-                pid = conn.pid
-                if pid and pid != current_pid:
-                    try:
-                        p = psutil.Process(pid)
-                        name = p.name().lower()
-                        if "python" in name:
-                            p.terminate()
-                            p.wait(timeout=1.5)
-                    except Exception:
-                        try:
-                            psutil.Process(pid).kill()
-                        except Exception:
-                            pass
-    except Exception:
-        pass
+
+def _start_scan_scheduler(
+    scanner: ScanCoordinator,
+    *,
+    initial_delay: float = 3.5,
+    interval: float = 60.0,
+    force: bool = False,
+) -> tuple[threading.Event, threading.Thread]:
+    """Start stoppable desktop scans without keeping the process alive at shutdown."""
+    stop_event = threading.Event()
+    delay = max(0.0, float(initial_delay))
+    period = max(0.01, float(interval))
+
+    def run() -> None:
+        if stop_event.wait(delay):
+            return
+        scanner.start_background(force=force)
+        while not stop_event.wait(period):
+            scanner.start_background()
+
+    thread = threading.Thread(target=run, daemon=True, name="tokenledger-desktop-scan")
+    thread.start()
+    return stop_event, thread
 
 
 def run_desktop() -> int:
@@ -88,44 +95,52 @@ def run_desktop() -> int:
     scanner = ScanCoordinator(database, adapters)
 
     if "--scan-only" in sys.argv:
-        result = scanner.scan_sync(force="--force" in sys.argv)
-        if sys.stdout:
-            print(result["message"])
-        return 0
-
-    # 4. Check if server is already running on 8765, else start in daemon thread
-    def check_health(timeout: float = 0.5) -> bool:
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8765/api/health", timeout=timeout):
-                return True
+            result = scanner.scan_sync(force="--force" in sys.argv)
+            if sys.stdout:
+                print(result["message"])
+            return 0
+        finally:
+            release_single_instance()
+
+    # 4. Prefer 8765, then bind an OS-assigned loopback port if it is occupied.
+    # Never probe or reuse an identity-unknown service on the requested port.
+    server = bind_local_server(config, database, scanner)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True, name="tokenledger-http")
+    server_thread.start()
+    window_url = local_server_url(server)
+
+    # 5. Start a stoppable initial + 60-second incremental scan schedule.
+    scan_stop, scan_thread = _start_scan_scheduler(
+        scanner,
+        force="--force" in sys.argv,
+    )
+
+    # Clean shutdown handler is defined before the Qt import so the fallback
+    # path can release the server, scheduler, and single-instance lock too.
+    cleanup_lock = threading.Lock()
+    cleanup_done = False
+
+    def cleanup() -> None:
+        nonlocal cleanup_done
+        with cleanup_lock:
+            if cleanup_done:
+                return
+            cleanup_done = True
+        scan_stop.set()
+        try:
+            server.shutdown()
         except Exception:
-            return False
-
-    server = None
-    server_alive = check_health(0.5)
-    if not server_alive:
-        _free_port_if_stale(8765)
+            pass
         try:
-            server = TokenLedgerServer(config, database, scanner)
-            server_thread = threading.Thread(target=server.serve_forever, daemon=True, name="tokenledger-http")
-            server_thread.start()
-            for _ in range(50):
-                if check_health(0.05):
-                    break
-                time.sleep(0.02)
-        except OSError:
-            time.sleep(0.2)
-            if not check_health(0.3):
-                _free_port_if_stale(8765)
-                try:
-                    server = TokenLedgerServer(config, database, scanner)
-                    server_thread = threading.Thread(target=server.serve_forever, daemon=True, name="tokenledger-http")
-                    server_thread.start()
-                except Exception:
-                    pass
-
-    # 5. Delay background scan by 3.5s so initial UI loads & renders instantly (<150ms)
-    threading.Timer(3.5, lambda: scanner.start_background(force="--force" in sys.argv)).start()
+            server.server_close()
+        except Exception:
+            pass
+        if server_thread.is_alive():
+            server_thread.join(timeout=0.5)
+        if scan_thread.is_alive() and scan_thread is not threading.current_thread():
+            scan_thread.join(timeout=0.5)
+        release_single_instance()
 
     # 6. Launch Native Desktop Window via PyQt5 WebEngine
     try:
@@ -162,7 +177,12 @@ def run_desktop() -> int:
                 self._is_dark = True
                 self.setWindowTitle("Token 账本 - 本机用量工作台")
                 self.setWindowIcon(icon)
-                self.resize(1440, 920)
+                screen = QApplication.primaryScreen()
+                if screen is not None:
+                    available = screen.availableGeometry()
+                    self.setGeometry(*_fit_window_geometry(available.x(), available.y(), available.width(), available.height()))
+                else:
+                    self.resize(1440, 920)
 
                 # Wrap view in dedicated container with layout to decouple QMainWindow geometry from Chromium HWND
                 self.container = QWidget(self)
@@ -173,7 +193,7 @@ def run_desktop() -> int:
                 self.view = QWebEngineView(self.container)
                 from PyQt5.QtGui import QColor
                 self.view.page().setBackgroundColor(QColor("#090C10"))
-                self.view.setUrl(QUrl("http://127.0.0.1:8765/"))
+                self.view.setUrl(QUrl(window_url))
                 self.layout.addWidget(self.view)
                 self.setCentralWidget(self.container)
 
@@ -240,18 +260,6 @@ def run_desktop() -> int:
         except Exception:
             pass
 
-        # Clean shutdown handler
-        def cleanup():
-            if server:
-                try:
-                    threading.Thread(target=server.shutdown, daemon=True).start()
-                    server.server_close()
-                except Exception:
-                    pass
-            release_single_instance()
-            # Terminate immediately so no daemon threads or helper processes hang
-            os._exit(0)
-
         app.aboutToQuit.connect(cleanup)
 
         ret = app.exec_()
@@ -268,13 +276,14 @@ def run_desktop() -> int:
             pass
 
         from .__main__ import launch_desktop_window
-        launch_desktop_window("http://127.0.0.1:8765/")
-        if server:
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                server.server_close()
+        try:
+            launch_desktop_window(window_url)
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            cleanup()
         return 0
 
 

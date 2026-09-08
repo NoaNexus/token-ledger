@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,7 +68,8 @@ def safe_usage_rollups(user_home: Path) -> list[dict[str, Any]]:
         if not {"id", "name"}.issubset(provider_columns):
             return []
 
-        rows: list[Any] = []
+        rollup_rows: list[dict[str, Any]] = []
+        proxy_rows: list[dict[str, Any]] = []
         has_rollups = "usage_daily_rollups" in tables
         has_proxy_logs = "proxy_request_logs" in tables
 
@@ -74,7 +78,7 @@ def safe_usage_rollups(user_home: Path) -> list[dict[str, Any]]:
                 row[1] for row in connection.execute("PRAGMA table_info(usage_daily_rollups)")
             }
             if ROLLUP_COLUMNS.issubset(rollup_columns):
-                rows.extend(connection.execute(
+                for row in connection.execute(
                     """
                     SELECT r.date, r.provider_id, COALESCE(p.name, 'CC Switch 历史平台') AS provider_name,
                            COALESCE(NULLIF(r.model, ''), '模型未记录') AS model,
@@ -87,11 +91,24 @@ def safe_usage_rollups(user_home: Path) -> list[dict[str, Any]]:
                     FROM usage_daily_rollups AS r
                     LEFT JOIN providers AS p ON p.id = r.provider_id
                     WHERE lower(r.app_type) LIKE 'claude%'
-                      AND r.input_token_semantics = 2
                     GROUP BY r.date, r.provider_id, provider_name, model, r.input_token_semantics
                     ORDER BY r.date, provider_name, model
                     """
-                ).fetchall())
+                ).fetchall():
+                    rollup_rows.append(
+                        {
+                            "date": str(row[0]),
+                            "provider_id": str(row[1]),
+                            "provider_name": str(row[2]),
+                            "model": str(row[3]),
+                            "input_token_semantics": _nonnegative_int(row[4]),
+                            "request_count": _nonnegative_int(row[5]),
+                            "input_tokens": _nonnegative_int(row[6]),
+                            "output_tokens": _nonnegative_int(row[7]),
+                            "cache_read_tokens": _nonnegative_int(row[8]),
+                            "cache_creation_tokens": _nonnegative_int(row[9]),
+                        }
+                    )
 
         if has_proxy_logs:
             proxy_columns = {
@@ -102,13 +119,6 @@ def safe_usage_rollups(user_home: Path) -> list[dict[str, Any]]:
                 "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens"
             }
             if required_proxy.issubset(proxy_columns):
-                exclude_dates_clause = ""
-                if has_rollups:
-                    exclude_dates_clause = """
-                        AND date(r.created_at, 'unixepoch', 'localtime') NOT IN (
-                            SELECT DISTINCT date FROM usage_daily_rollups WHERE lower(app_type) LIKE 'claude%'
-                        )
-                    """
                 proxy_sql = f"""
                     SELECT date(r.created_at, 'unixepoch', 'localtime') AS date,
                            r.provider_id,
@@ -123,27 +133,70 @@ def safe_usage_rollups(user_home: Path) -> list[dict[str, Any]]:
                     FROM proxy_request_logs AS r
                     LEFT JOIN providers AS p ON p.id = r.provider_id
                     WHERE lower(r.app_type) LIKE 'claude%'
-                      {exclude_dates_clause}
                     GROUP BY date, r.provider_id, provider_name, model
                     ORDER BY date, provider_name, model
                 """
-                rows.extend(connection.execute(proxy_sql).fetchall())
+                for row in connection.execute(proxy_sql).fetchall():
+                    proxy_rows.append(
+                        {
+                            "date": str(row[0]),
+                            "provider_id": str(row[1]),
+                            "provider_name": str(row[2]),
+                            "model": str(row[3]),
+                            "input_token_semantics": _nonnegative_int(row[4]),
+                            "request_count": _nonnegative_int(row[5]),
+                            "input_tokens": _nonnegative_int(row[6]),
+                            "output_tokens": _nonnegative_int(row[7]),
+                            "cache_read_tokens": _nonnegative_int(row[8]),
+                            "cache_creation_tokens": _nonnegative_int(row[9]),
+                        }
+                    )
 
-        return [
-            {
-                "date": str(row[0]),
-                "provider_id": str(row[1]),
-                "provider_name": str(row[2]),
-                "model": str(row[3]),
-                "input_token_semantics": _nonnegative_int(row[4]),
-                "request_count": _nonnegative_int(row[5]),
-                "input_tokens": _nonnegative_int(row[6]),
-                "output_tokens": _nonnegative_int(row[7]),
-                "cache_read_tokens": _nonnegative_int(row[8]),
-                "cache_creation_tokens": _nonnegative_int(row[9]),
-            }
-            for row in rows
-        ]
+        def complete_total(row: dict[str, Any]) -> int:
+            return rollup_input_total(row) + _nonnegative_int(row.get("output_tokens"))
+
+        # The source table can have separate rows for each input-token
+        # semantic. Normalize each row first, then add every row sharing the
+        # same account-day/provider/model key so a dict cannot silently drop a
+        # semantic group.
+        normalized_rollups: dict[tuple[str, str, str], dict[str, Any]] = {}
+        for row in rollup_rows:
+            key = (row["date"], row["provider_id"], row["model"])
+            merged_row = normalized_rollups.get(key)
+            if merged_row is None:
+                merged_row = {
+                    **row,
+                    "input_token_semantics": 1,
+                    "request_count": 0,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cache_read_tokens": 0,
+                    "cache_creation_tokens": 0,
+                }
+                normalized_rollups[key] = merged_row
+            merged_row["request_count"] += _nonnegative_int(row.get("request_count"))
+            merged_row["input_tokens"] += rollup_input_total(row)
+            merged_row["output_tokens"] += _nonnegative_int(row.get("output_tokens"))
+            merged_row["cache_read_tokens"] += _nonnegative_int(row.get("cache_read_tokens"))
+            merged_row["cache_creation_tokens"] += _nonnegative_int(row.get("cache_creation_tokens"))
+
+        rollups_by_key = normalized_rollups
+        proxies_by_key = {
+            (row["date"], row["provider_id"], row["model"]): row for row in proxy_rows
+        }
+        merged: list[dict[str, Any]] = []
+        for key in set(rollups_by_key) | set(proxies_by_key):
+            rollup = rollups_by_key.get(key)
+            proxy = proxies_by_key.get(key)
+            if rollup is None:
+                merged.append(proxy)
+            elif proxy is None:
+                merged.append(rollup)
+            else:
+                # Same date/provider/model can be present in both tables. Keep
+                # the larger complete source row while preserving other keys.
+                merged.append(proxy if complete_total(proxy) > complete_total(rollup) else rollup)
+        return sorted(merged, key=lambda row: (row["date"], row["provider_name"], row["model"]))
     except (OSError, sqlite3.Error):
         return []
     finally:
@@ -204,6 +257,32 @@ def _live_base_url(user_home: Path) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _safe_public_url(raw_url: Any) -> str | None:
+    """Return a non-sensitive HTTP(S) URL suitable for provider metadata."""
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        return None
+    try:
+        parsed = urlparse(raw_url.strip())
+        # Accessing .port validates malformed ports and may raise ValueError.
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"} or not parsed.netloc or parsed.hostname is None:
+        return None
+    host = parsed.hostname.lower().rstrip(".")
+    if not host:
+        return None
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    host_port = host if port is None else f"{host}:{port}"
+    path = parsed.path or ""
+    # Deliberately omit username/password, query, and fragment.  The path is
+    # retained because some public provider gateways need it to identify the
+    # API endpoint, but it is never combined with the original netloc.
+    return f"{scheme}://{host_port}{path}"
+
+
 def _safe_current_name(database_path: Path) -> str | None:
     """Read only non-secret identity columns; never read provider config blobs."""
     try:
@@ -258,17 +337,80 @@ def unique_model_platforms(user_home: Path) -> dict[str, str]:
 
 _BALANCE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _BALANCE_TTL = 30.0  # seconds
+_DEEPSEEK_BALANCE_HOST = "api.deepseek.com"
 
 
-def _query_deepseek_balance(api_key: str) -> dict[str, Any]:
+def _is_official_deepseek_base_url(raw_url: Any) -> bool:
+    if not isinstance(raw_url, str) or not raw_url.strip():
+        return False
+    try:
+        parsed = urlparse(raw_url)
+        host = (parsed.hostname or "").lower().rstrip(".")
+        port = parsed.port
+        has_userinfo = parsed.username is not None or parsed.password is not None
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() == "https"
+        and host == _DEEPSEEK_BALANCE_HOST
+        and port in (None, 443)
+        and not has_userinfo
+    )
+
+
+def _origin_key(raw_url: str) -> tuple[str, str, int] | None:
+    try:
+        parsed = urlparse(raw_url)
+        scheme = parsed.scheme.lower()
+        host = (parsed.hostname or "").lower().rstrip(".")
+        port = parsed.port
+        has_userinfo = parsed.username is not None or parsed.password is not None
+    except ValueError:
+        return None
+    if scheme not in {"http", "https"} or not host or has_userinfo:
+        return None
+    if port is None:
+        port = 443 if scheme == "https" else 80
+    return scheme, host, port
+
+
+class _SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Do not carry DeepSeek Authorization across a redirect origin."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if _origin_key(req.full_url) != _origin_key(newurl):
+            raise urllib.error.HTTPError(
+                req.full_url,
+                code,
+                "cross-origin redirect rejected",
+                headers,
+                fp,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _empty_balance(status: str = "unavailable", updated_at: str = "") -> dict[str, Any]:
+    return {
+        "total_balance": None,
+        "currency": None,
+        "is_available": False,
+        "balance_text": None,
+        "status": status,
+        "updated_at": updated_at,
+    }
+
+
+def _query_deepseek_balance(api_key: str, base_url: str | None = None) -> dict[str, Any]:
+    if not api_key or not _is_official_deepseek_base_url(base_url):
+        return _empty_balance()
+
     now = datetime.now().timestamp()
-    cache_key = f"deepseek:{api_key[:8] if len(api_key) >= 8 else api_key}"
+    # Never retain a credential prefix in process state: distinct keys must not collide.
+    cache_key = "deepseek:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()
     if cache_key in _BALANCE_CACHE:
         cached_time, cached_val = _BALANCE_CACHE[cache_key]
         if now - cached_time < _BALANCE_TTL:
-            return cached_val
-
-    import urllib.request
+            return dict(cached_val)
 
     req = urllib.request.Request(
         "https://api.deepseek.com/user/balance",
@@ -278,36 +420,40 @@ def _query_deepseek_balance(api_key: str) -> dict[str, Any]:
         },
     )
     try:
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
+        opener = urllib.request.build_opener(_SameOriginRedirectHandler())
+        with opener.open(req, timeout=2.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             balance_infos = data.get("balance_infos") or []
-            if balance_infos:
-                info = balance_infos[0]
-                total = str(info.get("total_balance", "0.00"))
-                curr = str(info.get("currency", "CNY"))
-                result = {
-                    "total_balance": total,
-                    "currency": curr,
-                    "is_available": bool(data.get("is_available", True)),
-                    "balance_text": f"{total} {curr}",
-                }
-                _BALANCE_CACHE[cache_key] = (now, result)
-                return result
+            if not isinstance(data, dict) or not balance_infos or not isinstance(balance_infos[0], dict):
+                raise ValueError("DeepSeek response has no balance_infos")
+            info = balance_infos[0]
+            total_value = info.get("total_balance")
+            if total_value is None or (isinstance(total_value, str) and not total_value.strip()):
+                raise ValueError("DeepSeek response has no total_balance")
+            total = str(total_value)
+            curr_value = info.get("currency")
+            curr = str(curr_value).strip() if curr_value is not None else ""
+            balance_text = f"{total} {curr}".strip()
+            available = data.get("is_available")
+            result = {
+                "total_balance": total,
+                "currency": curr or None,
+                "is_available": available is True,
+                "balance_text": balance_text,
+                "status": "fresh" if available is not False else "limited",
+                "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+            _BALANCE_CACHE[cache_key] = (now, result)
+            return dict(result)
     except Exception:
         pass
 
     if cache_key in _BALANCE_CACHE:
-        return _BALANCE_CACHE[cache_key][1]
-
-    # Fallback to last known balance
-    fallback = {
-        "total_balance": "60.24",
-        "currency": "CNY",
-        "is_available": True,
-        "balance_text": "60.24 CNY",
-    }
-    _BALANCE_CACHE[cache_key] = (now, fallback)
-    return fallback
+        cached = dict(_BALANCE_CACHE[cache_key][1])
+        cached["status"] = "stale"
+        cached["is_available"] = False
+        return cached
+    return _empty_balance()
 
 
 def safe_ccswitch_provider_quotas(
@@ -338,7 +484,7 @@ def safe_ccswitch_provider_quotas(
 
         rows = connection.execute(
             """
-            SELECT id, name, app_type, settings_config, website_url, sort_index, is_current, meta
+            SELECT id, name, app_type, settings_config, website_url, sort_index, is_current
             FROM providers
             WHERE lower(app_type) LIKE 'claude%'
             ORDER BY is_current DESC, sort_index ASC
@@ -354,7 +500,6 @@ def safe_ccswitch_provider_quotas(
     for row in rows:
         name = str(row["name"])
         is_curr = bool(row["is_current"])
-        website = row["website_url"]
 
         cfg: dict[str, Any] = {}
         if row["settings_config"]:
@@ -363,46 +508,33 @@ def safe_ccswitch_provider_quotas(
             except Exception:
                 pass
         env = cfg.get("env", {}) if isinstance(cfg, dict) else {}
+        if not isinstance(env, dict):
+            env = {}
         token = env.get("ANTHROPIC_AUTH_TOKEN")
         base_url = env.get("ANTHROPIC_BASE_URL")
-        if not website and base_url:
-            website = base_url
+        website = _safe_public_url(row["website_url"])
+        safe_base_url = _safe_public_url(base_url)
+        if not website:
+            website = safe_base_url
 
         balance_text = None
         remaining_percent = None
         status = "unavailable"
         message = ""
 
-        name_lower = name.lower()
-        if "deepseek" in name_lower and token:
-            bal_info = _query_deepseek_balance(str(token))
-            balance_text = bal_info["balance_text"]
-            remaining_percent = 100.0 if bal_info["is_available"] else 0.0
-            status = "fresh" if bal_info["is_available"] else "limited"
-            message = f"DeepSeek 官方账户余额: {balance_text} · 账户状态正常"
-        elif "zhipu" in name_lower:
-            balance_text = "待充值"
-            remaining_percent = 0.0
-            status = "limited"
-            message = "智谱开放平台 · 待充值 / 未配置 Coding Plan (CC Switch: 查询失败)"
-        elif "bailian" in name_lower:
-            balance_text = "按量计费"
-            remaining_percent = 0.0
-            status = "limited"
-            message = "阿里云百炼 MaaS 兼容端点 · 按量计费 (CC Switch: 自定义代理)"
-        elif "agnes" in name_lower:
-            balance_text = "按量计费"
-            remaining_percent = 0.0
-            status = "limited"
-            message = "Agnes APIHub 中转代理 · 按量计费"
-        elif "official" in name_lower or "claude" in name_lower:
-            balance_text = "未配置订阅"
-            status = "unavailable"
-            message = "Claude 官方原生通道 · 需 Anthropic 订阅授权"
+        if token and _is_official_deepseek_base_url(base_url):
+            bal_info = _query_deepseek_balance(str(token), str(base_url))
+            balance_text = bal_info.get("balance_text")
+            status = str(bal_info.get("status") or "unavailable")
+            updated_at = str(bal_info.get("updated_at") or now_iso)
+            if balance_text:
+                message = f"官方 DeepSeek 账户余额（采集于 {updated_at}）：{balance_text}"
+                if status == "stale":
+                    message += " · 官方查询暂时不可用，显示旧快照"
+            else:
+                message = "官方 DeepSeek 余额查询未返回可验证总额"
         else:
-            balance_text = "第三方代理"
-            status = "limited"
-            message = f"{name} 第三方服务商通道"
+            message = "未配置受支持的官方额度查询端点；余额与百分比未知"
 
         label = f"CC Switch · {name} (当前路由)" if is_curr else f"CC Switch · {name}"
 
@@ -412,9 +544,12 @@ def safe_ccswitch_provider_quotas(
             "label": label,
             "remaining_percent": remaining_percent,
             "used_percent": 0.0 if remaining_percent is not None else None,
-            "window_minutes": 0 if is_curr else 10080,
+            "window_minutes": None,
             "resets_at": None,
-            "updated_at": now_iso,
+            "updated_at": str(
+                (bal_info.get("updated_at") if token and _is_official_deepseek_base_url(base_url) else None)
+                or now_iso
+            ),
             "message": message,
             "balance_text": balance_text,
             "is_current": is_curr,

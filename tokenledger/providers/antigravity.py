@@ -10,6 +10,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from copy import deepcopy
+from dataclasses import asdict
 
 from ..models import DiscoveredFile, ParsedFile, ProviderProbe, QuotaSnapshot, UsageEvent
 from ..registry import descriptor
@@ -129,7 +131,7 @@ def _entry_estimate(obj: dict[str, Any]) -> tuple[int, int, int]:
 
 class AntigravityAdapter(ProviderAdapter):
     descriptor = descriptor("antigravity")
-    parser_revision = "deepmind-aac-v6"
+    parser_revision = "deepmind-aac-v7"
 
     @property
     def antigravity_home(self) -> Path:
@@ -159,7 +161,7 @@ class AntigravityAdapter(ProviderAdapter):
                                 csrf_token = cmdline[i + 1]
                             elif arg.startswith("--csrf_token="):
                                 csrf_token = arg.split("=", 1)[1]
-                        for conn in proc.connections(kind="inet"):
+                        for conn in proc.net_connections(kind="inet"):
                             if conn.status == "LISTEN":
                                 candidate_ports.append(conn.laddr.port)
                         if candidate_ports and csrf_token:
@@ -245,85 +247,74 @@ class AntigravityAdapter(ProviderAdapter):
                     continue
 
         if not quotas:
-            quotas = [
-                QuotaSnapshot(
-                    snapshot_id="antigravity:gemini-weekly",
-                    agent="antigravity",
-                    label="Gemini 每周限额",
-                    status="fresh",
-                    remaining_percent=86.8,
-                    used_percent=13.2,
-                    window_minutes=10080,
-                    resets_at="2026-09-11T00:14:22Z",
-                    updated_at=now_iso,
-                    message="您已使用了部分每周限额，它将在 4 天 11 小时后完全刷新",
-                ),
-                QuotaSnapshot(
-                    snapshot_id="antigravity:gemini-5h",
-                    agent="antigravity",
-                    label="Gemini 5小时限额",
-                    status="fresh",
-                    remaining_percent=74.4,
-                    used_percent=25.6,
-                    window_minutes=300,
-                    resets_at="2026-09-06T15:39:27Z",
-                    updated_at=now_iso,
-                    message="您已使用了部分 5 小时限额，它将在 3 小时 17 分钟后完全刷新",
-                ),
-                QuotaSnapshot(
-                    snapshot_id="antigravity:3p-weekly",
-                    agent="antigravity",
-                    label="Claude & GPT 每周限额",
-                    status="fresh",
-                    remaining_percent=100.0,
-                    used_percent=0.0,
-                    window_minutes=10080,
-                    resets_at="2026-09-13T12:21:37Z",
-                    updated_at=now_iso,
-                    message="Claude 和 GPT 模型共享每周限额",
-                ),
-                QuotaSnapshot(
-                    snapshot_id="antigravity:3p-5h",
-                    agent="antigravity",
-                    label="Claude & GPT 5小时限额",
-                    status="fresh",
-                    remaining_percent=100.0,
-                    used_percent=0.0,
-                    window_minutes=300,
-                    resets_at="2026-09-06T17:21:37Z",
-                    updated_at=now_iso,
-                    message="Claude 和 GPT 模型共享 5 小时限额",
-                ),
-            ]
+            cached = getattr(self, "_cached_quotas", [])
+            if cached:
+                quotas = [
+                    QuotaSnapshot(
+                        snapshot_id=item.snapshot_id,
+                        agent=item.agent,
+                        label=item.label,
+                        status="stale",
+                        remaining_percent=item.remaining_percent,
+                        used_percent=item.used_percent,
+                        window_minutes=item.window_minutes,
+                        resets_at=item.resets_at,
+                        updated_at=item.updated_at,
+                        message=(
+                            item.message
+                            if "旧快照" in item.message
+                            else f"{item.message} · 官方额度查询暂时不可用，显示旧快照"
+                        ),
+                    )
+                    for item in cached
+                ]
 
-        self._cached_quotas = quotas
+        self._cached_quotas = list(quotas)
         self._cached_quotas_time = now_dt
-        return quotas
+        return list(quotas)
 
-    def _get_session_titles(self) -> dict[str, str]:
-        proto_path = self.antigravity_home / "agyhub_summaries_proto.pb"
-        titles: dict[str, str] = {}
-        if proto_path.is_file():
+    def _dependency_signature(
+        self, discovered: DiscoveredFile
+    ) -> tuple[tuple[str, int | None, int | None], ...]:
+        session_id = discovered.path.parents[2].name if len(discovered.path.parents) > 2 else discovered.path.stem
+        database_path = self.antigravity_home / "conversations" / f"{session_id}.db"
+        dependencies = (
+            discovered.path,
+            database_path,
+            Path(f"{database_path}-wal"),
+            Path(f"{database_path}-shm"),
+        )
+        signature: list[tuple[str, int | None, int | None]] = []
+        for path in dependencies:
             try:
-                data = proto_path.read_bytes()
-                pattern = re.compile(
-                    rb'\n\$([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\x12[\x80-\xff]*[\x00-\x7f]\n([\x01-\x7f])([^\x00-\x1f\x7f-\x9f]{1,100})'
-                )
-                for cid, length, title in pattern.findall(data):
-                    t = title.decode("utf-8", errors="ignore").strip()
-                    if t:
-                        titles[cid.decode()] = t
-            except Exception:
-                pass
-        return titles
+                stat = path.stat()
+                signature.append((str(path.resolve()).lower(), stat.st_mtime_ns, stat.st_size))
+            except OSError:
+                signature.append((str(path.resolve()).lower(), None, None))
+        return tuple(signature)
+
+    def should_reparse(self, discovered: DiscoveredFile) -> bool:
+        key = str(discovered.path.resolve()).lower()
+        current = self._dependency_signature(discovered)
+        previous = getattr(self, "_dependency_signatures", {}).get(key)
+        return previous is None or previous != current
+
+    def mark_parsed(self, discovered: DiscoveredFile) -> None:
+        """Commit dependency state only after the scanner stores parsed events."""
+        if not hasattr(self, "_dependency_signatures"):
+            self._dependency_signatures = {}
+        key = str(discovered.path.resolve()).lower()
+        pending = getattr(self, "_pending_dependency_signatures", {}).pop(key, None)
+        self._dependency_signatures[key] = pending if pending is not None else self._dependency_signature(discovered)
 
     def _get_conversation_gen_metadata(self, session_id: str) -> dict[int, dict[str, Any]]:
         db_path = self.antigravity_home / "conversations" / f"{session_id}.db"
         if not db_path.is_file():
             return {}
         result: dict[int, dict[str, Any]] = {}
+        con = None
         try:
-            con = sqlite3.connect(db_path, timeout=5)
+            con = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
             cur = con.cursor()
             cur.execute("SELECT idx, data FROM gen_metadata WHERE data IS NOT NULL")
             for idx, data in cur.fetchall():
@@ -336,10 +327,10 @@ class AntigravityAdapter(ProviderAdapter):
                 model = (
                     model_raw[0].decode(errors="ignore")
                     if isinstance(model_raw, list) and model_raw
-                    else "gemini-3.8-flash"
+                    else "模型未记录"
                 )
                 if model == "unknown" or not model:
-                    model = "gemini-3.8-flash"
+                    model = "模型未记录"
                 f4_raw = f1.get(4, [])
                 f4 = _parse_proto(f4_raw[0]) if f4_raw else {}
                 uncached = f4.get(2, 0)
@@ -353,9 +344,11 @@ class AntigravityAdapter(ProviderAdapter):
                     "output": out,
                     "thinking": thinking,
                 }
-            con.close()
         except Exception:
             pass
+        finally:
+            if con is not None:
+                con.close()
         return result
 
     def discover_files(self) -> list[DiscoveredFile]:
@@ -382,24 +375,36 @@ class AntigravityAdapter(ProviderAdapter):
         files = self.discover_files()
         conversation_root = self.antigravity_home / "conversations"
         db_files = list(conversation_root.glob("*.db")) if conversation_root.is_dir() else []
-        has_db = len(db_files) > 0
-
+        if not self.antigravity_home.exists():
+            return ProviderProbe("missing", "Antigravity", "~/.gemini/antigravity",
+                                 "未发现 Antigravity 数据目录", {"budget_windows": []})
+        signature = (tuple(self._dependency_signature(f) for f in files),
+                     tuple(sorted(str(p) for p in db_files)))
+        budget_windows = [asdict(q) for q in self._fetch_quota_windows()]
+        cached = getattr(self, "_probe_cache", None)
+        if cached and cached[0] == signature:
+            result = deepcopy(cached[1])
+            result.metadata["budget_windows"] = budget_windows
+            return result
+        probe_ok = True
         activity_count = 0
         total_tokens = 0
+        reported_tokens = 0
+        estimated_tokens = 0
         total_reasoning = 0
         total_output = 0
         truncated_entries = 0
         event_types: set[str] = set()
         tools_counter: dict[str, int] = {}
-        session_titles = self._get_session_titles()
         session_stats: list[dict[str, Any]] = []
         discovered_models: set[str] = set()
+        has_reported_metadata = False
+        has_estimated_metadata = False
 
         for discovered in files:
             sess_id = discovered.path.parents[2].name if len(discovered.path.parents) > 2 else discovered.path.stem
             s_tok = 0
             s_calls = 0
-            s_prompt = ""
             s_models: set[str] = set()
 
             try:
@@ -415,9 +420,6 @@ class AntigravityAdapter(ProviderAdapter):
                         event_type = obj.get("type")
                         if isinstance(event_type, str):
                             event_types.add(event_type)
-                        if not s_prompt and event_type == "USER_INPUT":
-                            raw_content = str(obj.get("content") or "")
-                            s_prompt = raw_content.replace("<USER_REQUEST>", "").replace("</USER_REQUEST>", "").strip()[:40]
                         tool_calls = obj.get("tool_calls") or []
                         for tc in tool_calls:
                             name = tc.get("name") if isinstance(tc, dict) else str(tc)
@@ -425,10 +427,12 @@ class AntigravityAdapter(ProviderAdapter):
                                 tools_counter[name] = tools_counter.get(name, 0) + 1
                                 s_calls += 1
             except OSError:
+                probe_ok = False
                 continue
 
             gen_meta = self._get_conversation_gen_metadata(sess_id)
             if gen_meta:
+                has_reported_metadata = True
                 for idx, m in gen_meta.items():
                     m_name = m["model"]
                     discovered_models.add(m_name)
@@ -436,9 +440,11 @@ class AntigravityAdapter(ProviderAdapter):
                     tot = m["uncached"] + m["cached"] + m["output"]
                     s_tok += tot
                     total_tokens += tot
+                    reported_tokens += tot
                     total_output += m["output"]
                     total_reasoning += m["thinking"]
             else:
+                has_estimated_metadata = True
                 try:
                     with discovered.path.open("r", encoding="utf-8", errors="replace") as handle:
                         for line in handle:
@@ -450,58 +456,46 @@ class AntigravityAdapter(ProviderAdapter):
                             tot = inp + out
                             s_tok += tot
                             total_tokens += tot
+                            estimated_tokens += tot
                             total_output += out
                             total_reasoning += r
                 except OSError:
+                    probe_ok = False
                     continue
 
-            disp_title = session_titles.get(sess_id) or s_prompt or f"工程会话 {sess_id[:8]}"
+            disp_title = f"工程会话 {sess_id[:8]}"
             session_stats.append({
                 "session_id": sess_id,
                 "title": disp_title,
                 "tokens": s_tok,
                 "tool_calls": s_calls,
-                "models": sorted(s_models) if s_models else ["gemini-3.8-flash"],
+                "models": sorted(s_models) if s_models else ["模型未记录"],
             })
 
         session_stats.sort(key=lambda item: item["tokens"], reverse=True)
         tool_calls_total = sum(tools_counter.values())
 
-        if not self.antigravity_home.exists():
-            return ProviderProbe("missing", "Antigravity", "~/.gemini/antigravity", "未发现 Antigravity 数据目录")
-
         sorted_tools = dict(sorted(tools_counter.items(), key=lambda x: x[1], reverse=True)[:10])
-        models_list = sorted(discovered_models) if discovered_models else ["gemini-3.8-flash", "gemini-3.7-flash"]
+        models_list = sorted(discovered_models) if discovered_models else ["模型未记录"]
 
-        quota_snapshots = self._fetch_quota_windows()
-        budget_windows = [
-            {
-                "snapshot_id": q.snapshot_id,
-                "agent": q.agent,
-                "status": q.status,
-                "label": q.label,
-                "remaining_percent": q.remaining_percent,
-                "used_percent": q.used_percent,
-                "window_minutes": q.window_minutes,
-                "resets_at": q.resets_at,
-                "updated_at": q.updated_at,
-                "message": q.message,
-            }
-            for q in quota_snapshots
-        ]
-
-        return ProviderProbe(
-            "ready" if has_db else ("limited" if files else "empty"),
+        if has_reported_metadata and has_estimated_metadata:
+            usage_mode = "mixed"
+        elif has_reported_metadata:
+            usage_mode = "reported"
+        else:
+            usage_mode = "estimated"
+        result = ProviderProbe(
+            "ready" if has_reported_metadata and not has_estimated_metadata else ("limited" if files else "empty"),
             "Antigravity 本地原生记录",
             "~/.gemini/antigravity",
             (f"发现 {len(files)} 个工程会话、{activity_count} 条记录；执行 {tool_calls_total} 次 Agent 工具调用" if files else "未发现会话记录"),
             {
                 "usage_available": bool(files),
-                "usage_mode": "reported" if has_db else "estimated",
-                "model_available": has_db,
+                "usage_mode": usage_mode,
+                "model_available": any(m != "模型未记录" for m in discovered_models),
                 "activity_count": activity_count,
-                "estimated_tokens": total_tokens if not has_db else 0,
-                "reported_tokens": total_tokens if has_db else 0,
+                "estimated_tokens": estimated_tokens,
+                "reported_tokens": reported_tokens,
                 "truncated_entries": truncated_entries,
                 "event_types": sorted(event_types),
                 "conversation_databases": len(db_files),
@@ -512,20 +506,26 @@ class AntigravityAdapter(ProviderAdapter):
                 "thinking_ratio": (total_reasoning / max(total_output, 1)),
                 "top_sessions": session_stats[:8],
                 "budget_windows": budget_windows,
-                "quota_note": "Antigravity 官方服务连接 · 实时同步 Gemini 每周限额与 5 小时限额",
-                "reason": "读取本地 conversations.db 提取 Gemini 3.8/3.7 Flash 精确用量与思维链",
+                "quota_note": "额度仅来自可用的服务端快照；查询失败时显示旧快照或未提供",
+                "reason": "结构化用量优先；缺失时仅估算本地可见文本，不代表完整上下文",
             },
         )
+        if probe_ok:
+            self._probe_cache = (signature, deepcopy(result))
+        return result
 
     def parse_file(self, discovered: DiscoveredFile) -> ParsedFile:
+        # Capture before reading: a DB update during parsing must trigger a
+        # subsequent scan, not be mistaken for already indexed data.
+        if not hasattr(self, "_pending_dependency_signatures"):
+            self._pending_dependency_signatures = {}
+        self._pending_dependency_signatures[str(discovered.path.resolve()).lower()] = self._dependency_signature(discovered)
         event_types: set[str] = set()
         path = discovered.path
         session_id = path.parents[2].name if len(path.parents) > 2 else path.stem
-        session_titles = self._get_session_titles()
         result = ParsedFile(session_count=1)
         truncated_entries = 0
         session_tools: dict[str, int] = {}
-        first_prompt = ""
         step_timestamps: dict[int, str] = {}
         step_tools: dict[int, int] = {}
 
@@ -546,10 +546,6 @@ class AntigravityAdapter(ProviderAdapter):
                     )
                     if idx is not None:
                         step_timestamps[idx] = ts
-
-                    if not first_prompt and event_type == "USER_INPUT":
-                        raw_content = str(obj.get("content") or "")
-                        first_prompt = raw_content.replace("<USER_REQUEST>", "").replace("</USER_REQUEST>", "").strip()[:40]
 
                     if obj.get("truncated_fields"):
                         truncated_entries += 1
@@ -621,7 +617,7 @@ class AntigravityAdapter(ProviderAdapter):
                             obj.get("created_at") if isinstance(obj.get("created_at"), str) else None,
                             path,
                         )
-                        model = "gemini-3.8-flash"
+                        model = "模型未记录（估算）"
                         result.events.append(
                             UsageEvent(
                                 event_id=stable_id("antigravity-estimate", str(path), line_number),
@@ -642,7 +638,7 @@ class AntigravityAdapter(ProviderAdapter):
             except OSError:
                 raise
 
-        disp_title = session_titles.get(session_id) or first_prompt or f"工程会话 {session_id[:8]}"
+        disp_title = f"工程会话 {session_id[:8]}"
         result.metadata = {
             "session_id": session_id,
             "session_title": disp_title,
@@ -656,4 +652,3 @@ class AntigravityAdapter(ProviderAdapter):
         }
         result.quotas = self._fetch_quota_windows()
         return result
-
