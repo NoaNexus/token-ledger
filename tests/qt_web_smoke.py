@@ -285,6 +285,23 @@ def main() -> int:
                                    detailHidden='none', injectedMarkup=False):
                 raise AssertionError(f"Unknown quota or escaping regression: {quota_check!r}")
 
+            focus_check = json.loads(evaluate(page, """JSON.stringify((() => {
+                const button = document.getElementById('tab-overview');
+                button.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+                button.focus();
+                const mouseOutline = getComputedStyle(button).outlineStyle;
+                button.dispatchEvent(new KeyboardEvent('keydown', {key:'Tab', bubbles:true}));
+                const keyboardOutline = getComputedStyle(button).outlineStyle;
+                button.dispatchEvent(new MouseEvent('mousedown', {bubbles:true}));
+                const logo = document.querySelector('.brand-logo-img').getBoundingClientRect();
+                const names = document.querySelector('.brand-names').getBoundingClientRect();
+                return {mouseOutline, keyboardOutline, brandGap:names.left-logo.right};
+            })())""", timeout_ms))
+            if focus_check['mouseOutline'] != 'none' or focus_check['keyboardOutline'] != 'solid':
+                raise AssertionError(f"Focus modality regression: {focus_check!r}")
+            if abs(focus_check['brandGap'] - 12) > 1:
+                raise AssertionError(f"Brand spacing regression: {focus_check!r}")
+
             theme_json = evaluate(
                 page,
                 "JSON.stringify((() => {"

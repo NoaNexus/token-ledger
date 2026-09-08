@@ -2629,6 +2629,17 @@ function initParticleCanvas() {
    Event Bindings & Bootstrap
    ========================================================================== */
 function bindEvents() {
+  // Preserve keyboard focus cues without a native yellow mouse-click outline,
+  // including on Qt versions without :focus-visible support.
+  document.documentElement.dataset.inputModality = "keyboard";
+  const usePointer = () => { document.documentElement.dataset.inputModality = "pointer"; };
+  document.addEventListener("mousedown", usePointer, true);
+  document.addEventListener("touchstart", usePointer, { capture: true, passive: true });
+  document.addEventListener("keydown", (event) => {
+    if (!event.altKey && !event.ctrlKey && !event.metaKey) {
+      document.documentElement.dataset.inputModality = "keyboard";
+    }
+  }, true);
   setupTheme();
   initSmoothScroll();
   initParticleCanvas();

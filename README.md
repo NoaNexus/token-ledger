@@ -1,4 +1,4 @@
-# Token Ledger / Token 账本
+# toekn用量统计
 
 Windows 本地优先的 AI Agent 用量查看器，使用 PyQt5 / Qt WebEngine 展示本地索引中的 Codex、Claude Code 和 Antigravity 用量。当前版本：2.4.3。
 

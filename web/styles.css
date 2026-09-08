@@ -150,12 +150,21 @@ select,
 .brand-group {
   -webkit-tap-highlight-color: transparent;
 }
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-[role="button"]:focus-visible,
-[role="tab"]:focus-visible,
-[tabindex]:focus-visible {
+/* Qt 5.15's Chromium does not reliably support :focus-visible. */
+button:focus,
+input:focus,
+select:focus,
+[role="button"]:focus,
+[role="tab"]:focus,
+[tabindex]:focus {
+  outline: none;
+}
+html[data-input-modality="keyboard"] button:focus,
+html[data-input-modality="keyboard"] input:focus,
+html[data-input-modality="keyboard"] select:focus,
+html[data-input-modality="keyboard"] [role="button"]:focus,
+html[data-input-modality="keyboard"] [role="tab"]:focus,
+html[data-input-modality="keyboard"] [tabindex]:focus {
   outline: 2px solid var(--border-focus);
   outline-offset: 3px;
 }
@@ -344,7 +353,7 @@ html.dark .specular-glare, [data-theme="dark"] .specular-glare {
 .brand-group {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 0;
   padding: 0;
   border: 0;
   background: transparent;
@@ -385,6 +394,8 @@ html.dark .specular-glare, [data-theme="dark"] .specular-glare {
 .brand-names {
   display: flex;
   flex-direction: column;
+  /* Use margin: older embedded Chromium ignores flex gap. */
+  margin-left: 12px;
 }
 .brand-title-wrap {
   display: flex;
