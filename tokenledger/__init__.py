@@ -1,4 +1,3 @@
 """Token Ledger: local-first AI agent usage accounting."""
 
-__version__ = "0.1.0"
-
+__version__ = "2.4.4"

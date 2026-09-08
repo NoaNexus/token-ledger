@@ -1,6 +1,6 @@
 # toekn用量统计
 
-Windows 本地优先的 AI Agent 用量查看器，使用 PyQt5 / Qt WebEngine 展示本地索引中的 Codex、Claude Code 和 Antigravity 用量。当前版本：2.4.3。
+Windows 本地优先的 AI Agent 用量查看器，使用 PyQt5 / Qt WebEngine 展示本地索引中的 Codex、Claude Code 和 Antigravity 用量。当前版本：2.4.4。
 
 ## 启动
 
@@ -45,4 +45,4 @@ python -m pytest -q
 python -m PyInstaller --noconfirm --clean TokenLedgerNative.spec
 ```
 
-[发布说明](docs/RELEASE_NOTES_v2.4.3.md) · [开发交接](docs/CODEX_HANDOVER.md) · [对账口径](docs/TOKEN_RECONCILIATION_UPGRADE.md)
+[发布说明](docs/RELEASE_NOTES_v2.4.4.md) · [开发交接](docs/CODEX_HANDOVER.md) · [对账口径](docs/TOKEN_RECONCILIATION_UPGRADE.md)
