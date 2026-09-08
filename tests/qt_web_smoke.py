@@ -302,6 +302,53 @@ def main() -> int:
             if abs(focus_check['brandGap'] - 12) > 1:
                 raise AssertionError(f"Brand spacing regression: {focus_check!r}")
 
+            evaluate(page, """(() => {
+                window.__tiltCard = document.querySelector('#overviewPanel .glass-card');
+                const card = window.__tiltCard;
+                const r = card.getBoundingClientRect();
+                card.dispatchEvent(new MouseEvent('mouseenter'));
+                card.dispatchEvent(new MouseEvent('mousemove', {
+                    clientX:r.left+r.width*.85, clientY:r.top+r.height*.2}));
+            })()""", timeout_ms)
+            wait_ms(350)
+            tilt_check = json.loads(evaluate(page, """JSON.stringify((() => {
+                const card = window.__tiltCard;
+                const glare = card.querySelector('.specular-glare');
+                render({statusOnly:true});
+                return {transform:getComputedStyle(card).transform,
+                    glareWidth:glare.getBoundingClientRect().width,
+                    glareHeight:glare.getBoundingClientRect().height,
+                    glareOpacity:Number(getComputedStyle(glare).opacity),
+                    sameCard:card===document.querySelector('#overviewPanel .glass-card')};
+            })())""", timeout_ms))
+            if (tilt_check['transform'] == 'none' or tilt_check['glareWidth'] <= 0
+                    or tilt_check['glareHeight'] <= 0 or tilt_check['glareOpacity'] < .5
+                    or not tilt_check['sameCard']):
+                raise AssertionError(f"Tilt/mirror/progress repaint regression: {tilt_check!r}")
+            evaluate(page, "window.__tiltCard.dispatchEvent(new MouseEvent('mouseleave'))", timeout_ms)
+            wait_ms(650)
+            rest_transform = evaluate(page, "getComputedStyle(window.__tiltCard).transform", timeout_ms)
+            if rest_transform != 'none':
+                raise AssertionError(f'Card failed to settle flat after mouse leave: {rest_transform}')
+
+            evaluate(page, """(() => {
+                const original = getJson;
+                getJson = async (url) => {
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                    return url.includes('/api/dashboard') ? state.data : state.diagnostics;
+                };
+                window.__quietFinished = false;
+                loadDashboard({quiet:true}).finally(() => {
+                    getJson = original; window.__quietFinished = true;
+                });
+            })()""", timeout_ms)
+            wait_ms(120)
+            if evaluate(page, "getComputedStyle(document.getElementById('mainContent')).opacity", timeout_ms) != '1':
+                raise AssertionError('Background refresh dimmed the page')
+            wait_ms(450)
+            if not evaluate(page, 'window.__quietFinished', timeout_ms):
+                raise AssertionError('Background refresh failed to finish')
+
             theme_json = evaluate(
                 page,
                 "JSON.stringify((() => {"
@@ -327,6 +374,16 @@ def main() -> int:
             screenshot = args.artifact_dir / "qt-web-smoke.png"
             if not view.grab().save(str(screenshot), "PNG"):
                 raise OSError(f"failed to save screenshot: {screenshot}")
+            evaluate(page, """(() => {
+                const c = document.querySelector('#overviewPanel .glass-card');
+                const r = c.getBoundingClientRect();
+                c.dispatchEvent(new MouseEvent('mouseenter'));
+                c.dispatchEvent(new MouseEvent('mousemove', {
+                    clientX:r.left+r.width*.8, clientY:r.top+r.height*.2}));
+            })()""", timeout_ms)
+            wait_ms(600)
+            if not view.grab().save(str(args.artifact_dir / 'qt-web-tilt.png'), 'PNG'):
+                raise OSError('Failed to save tilted card screenshot')
             print(
                 json.dumps(
                     {

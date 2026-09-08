@@ -420,8 +420,6 @@ async function getJson(url, options = {}) {
 async function loadDashboard({ quiet = false } = {}) {
   if (!quiet) {
     setLoading(true);
-  } else if (elements.main) {
-    elements.main.classList.add("is-refreshing");
   }
   try {
     const query = new URLSearchParams({ days: state.range, agent: state.agent });
@@ -445,8 +443,6 @@ async function loadDashboard({ quiet = false } = {}) {
   } finally {
     if (!quiet) {
       setLoading(false);
-    } else if (elements.main) {
-      elements.main.classList.remove("is-refreshing");
     }
     render();
     if (!state.preview && state.data?.meta?.scan?.status === "scanning" && !state.polling) {
@@ -470,7 +466,7 @@ function setConnection(type, label) {
   }
 }
 
-function render() {
+function render({ statusOnly = false } = {}) {
   if (!state.data) return;
   const { data } = state;
 
@@ -489,6 +485,8 @@ function render() {
     elements.scanLabel.textContent = data.meta.scan.status === "scanning" ? `扫描 ${data.meta.scan.progress || 0}%` : "扫描本机";
   }
 
+  // Polling progress must not replace cards underneath an active pointer.
+  if (statusOnly) return;
   try {
     populateAgents(data.agents);
   } catch (e) {
@@ -2359,7 +2357,7 @@ function startPolling() {
     try {
       const health = await getJson("/api/health");
       if (state.data) state.data.meta.scan = health.scan;
-      render();
+      render({ statusOnly: true });
       if (!["scanning"].includes(health.scan.status)) {
         clearInterval(state.polling);
         state.polling = null;
@@ -2468,7 +2466,6 @@ function initSmoothScroll() {
    3D Tilt & Specular Glare Effect (From Digital Garden Architecture)
    ========================================================================== */
 function setupTiltCards() {
-  if (prefersReducedMotion()) return;
   const cards = document.querySelectorAll(".tilt-card, .glass-card");
   cards.forEach((card) => {
     if (card._hasTiltAttached) return;
@@ -2483,39 +2480,46 @@ function setupTiltCards() {
 
     let rafId = null;
     let rect = null;
+    let pointerX = 0;
+    let pointerY = 0;
+
+    const reset = () => {
+      if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+      rect = null;
+      card.classList.remove("is-tilting");
+      card.style.removeProperty("transform");
+    };
 
     card.addEventListener("mouseenter", () => {
+      if (prefersReducedMotion()) return reset();
       rect = card.getBoundingClientRect();
-      // Ensure zero residual transform to guarantee razor-sharp ClearType text rendering
-      card.style.removeProperty("transform");
+      card.classList.add("is-tilting");
     });
 
     card.addEventListener("mousemove", (e) => {
+      if (prefersReducedMotion()) return reset();
       if (!rect) rect = card.getBoundingClientRect();
-      const clientX = e.clientX;
-      const clientY = e.clientY;
+      pointerX = e.clientX;
+      pointerY = e.clientY;
 
       if (rafId) return;
       rafId = requestAnimationFrame(() => {
         rafId = null;
         if (!rect) return;
-        const x = clientX - rect.left;
-        const y = clientY - rect.top;
-
-        // 仅动态投射镜面高光光泽（光标跟随），绝不触碰 DOM transform，彻底杜绝任何字体发虚发糊
+        if (!card.isConnected || prefersReducedMotion()) return reset();
+        const x = Math.max(0, Math.min(rect.width, pointerX - rect.left));
+        const y = Math.max(0, Math.min(rect.height, pointerY - rect.top));
+        if (!rect.width || !rect.height) return reset();
+        const rotX = (y / rect.height * 2 - 1) * -4.2;
+        const rotY = (x / rect.width * 2 - 1) * 4.2;
+        card.style.transform = `perspective(1000px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
         card.style.setProperty("--glare-x", `${((x / rect.width) * 100).toFixed(1)}%`);
         card.style.setProperty("--glare-y", `${((y / rect.height) * 100).toFixed(1)}%`);
       });
     });
 
-    card.addEventListener("mouseleave", () => {
-      if (rafId) {
-        cancelAnimationFrame(rafId);
-        rafId = null;
-      }
-      rect = null;
-      card.style.removeProperty("transform");
-    });
+    card.addEventListener("mouseleave", reset);
   });
 }
 

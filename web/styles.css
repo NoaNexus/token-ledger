@@ -207,17 +207,17 @@ html.light .ambient-glow {
    3D 浮雕与镜面高光反射 (来自数字后花园旗舰设计)
    ========================================================================== */
 .tilt-wrapper {
-  perspective: none;
+  perspective: 1000px;
 }
 .tilt-card, .glass-card {
   position: relative;
   border-radius: 20px;
-  /* 确保字体渲染 100% 锐利，杜绝 3D 透视变换与 GPU 纹理重采样导致的模糊 */
+  /* Return to a flat surface at rest; only the hovered card is transformed. */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  transform: none !important;
-  transition: border-color 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease;
+  transform: none;
+  transition: transform 0.18s ease-out, border-color 0.2s ease, box-shadow 0.25s ease, background-color 0.2s ease;
 }
 .tilt-card:hover, .glass-card:hover {
   box-shadow: var(--shadow-hover);
@@ -225,7 +225,10 @@ html.light .ambient-glow {
 }
 .specular-glare {
   position: absolute;
-  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   border-radius: inherit;
   background: radial-gradient(circle at var(--glare-x, 50%) var(--glare-y, 50%), rgba(255, 255, 255, 0.28), transparent 60%);
   pointer-events: none;
@@ -233,7 +236,8 @@ html.light .ambient-glow {
   opacity: 0;
   transition: opacity 0.3s;
 }
-.tilt-card:hover .specular-glare, .glass-card:hover .specular-glare {
+.tilt-card:hover .specular-glare, .glass-card:hover .specular-glare,
+.tilt-card.is-tilting > .specular-glare {
   opacity: 1;
 }
 html.dark .specular-glare, [data-theme="dark"] .specular-glare {
@@ -656,10 +660,6 @@ html.light .theme-icon--moon { display: none; }
 .workspace {
   padding: 86px 24px 48px;
   flex: 1;
-  transition: opacity 0.12s ease;
-}
-.workspace.is-refreshing {
-  opacity: 0.82;
 }
 .agent-panorama-section, [data-panel], .panel-header-hero, section {
   scroll-margin-top: 80px;
@@ -2331,6 +2331,12 @@ html.light .kpi-cost-badge {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .tilt-card {
+    transform: none !important;
+  }
+  .specular-glare {
+    opacity: 0 !important;
+  }
   *,
   *::before,
   *::after {
