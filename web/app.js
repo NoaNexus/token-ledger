@@ -2471,6 +2471,9 @@ function setupTiltCards() {
     if (card._hasTiltAttached) return;
     card._hasTiltAttached = true;
     card.classList.add("tilt-card");
+    // Only compact summary cards own a moving shell. Large data panels stay flat.
+    const hasDepth = card.matches('.kpi-card, .agent-card');
+    card.classList.toggle('tilt-depth', hasDepth);
 
     let surface = card.querySelector(':scope > .tilt-surface');
     if (!surface) {
@@ -2516,9 +2519,12 @@ function setupTiltCards() {
         const x = Math.max(0, Math.min(rect.width, pointerX - rect.left));
         const y = Math.max(0, Math.min(rect.height, pointerY - rect.top));
         if (!rect.width || !rect.height) return reset();
-        const rotX = (y / rect.height * 2 - 1) * -4.2;
-        const rotY = (x / rect.width * 2 - 1) * 4.2;
-        surface.style.transform = `perspective(1000px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+        if (hasDepth) {
+          const amplitude = Math.min(1.4, 600 / Math.max(rect.width, rect.height));
+          const rotX = (y / rect.height * 2 - 1) * -amplitude;
+          const rotY = (x / rect.width * 2 - 1) * amplitude;
+          surface.style.transform = `perspective(2400px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+        }
         card.style.setProperty("--glare-x", `${((x / rect.width) * 100).toFixed(1)}%`);
         card.style.setProperty("--glare-y", `${((y / rect.height) * 100).toFixed(1)}%`);
       });

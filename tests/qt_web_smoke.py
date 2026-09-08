@@ -314,7 +314,7 @@ def main() -> int:
                 card.dispatchEvent(new MouseEvent('mousemove', {
                     clientX:r.left+r.width*.85, clientY:r.top+r.height*.2}));
             })()""", timeout_ms)
-            wait_ms(350)
+            wait_ms(1000)
             tilt_check = json.loads(evaluate(page, """JSON.stringify((() => {
                 const card = window.__tiltCard;
                 const glare = card.querySelector('.specular-glare');
@@ -322,6 +322,8 @@ def main() -> int:
                 render({statusOnly:true});
                 return {transform:getComputedStyle(card.querySelector('.tilt-surface')).transform,
                     textTransform:getComputedStyle(card).transform,
+                    fixedBorder:getComputedStyle(card).borderTopColor,
+                    fixedBackground:getComputedStyle(card).backgroundColor,
                     textUnmoved:JSON.stringify([text.x,text.y,text.width,text.height]) === JSON.stringify(window.__textBeforeTilt),
                     glareWidth:glare.getBoundingClientRect().width,
                     glareHeight:glare.getBoundingClientRect().height,
@@ -331,6 +333,8 @@ def main() -> int:
             if (tilt_check['transform'] == 'none' or tilt_check['glareWidth'] <= 0
                     or tilt_check['glareHeight'] <= 0 or tilt_check['glareOpacity'] < .5
                     or tilt_check['textTransform'] != 'none' or not tilt_check['textUnmoved']
+                    or tilt_check['fixedBorder'] != 'rgba(0, 0, 0, 0)'
+                    or tilt_check['fixedBackground'] != 'rgba(0, 0, 0, 0)'
                     or not tilt_check['sameCard']):
                 raise AssertionError(f"Tilt/mirror/progress repaint regression: {tilt_check!r}")
             evaluate(page, "window.__tiltCard.dispatchEvent(new MouseEvent('mouseleave'))", timeout_ms)
@@ -412,9 +416,36 @@ def main() -> int:
                     raise AssertionError(f'Layout regression at {width}px: {layout!r}')
             view.resize(1440, 1000)
             evaluate(page, "document.getElementById('themeToggleBtn').click(); window.scrollTo(0, 150)", timeout_ms)
-            wait_ms(600)
+            wait_ms(1500)
+            evaluate(page, """(() => {
+                const c = document.querySelector('.flow-card');
+                const r = c.getBoundingClientRect();
+                c.dispatchEvent(new MouseEvent('mouseenter'));
+                c.dispatchEvent(new MouseEvent('mousemove', {
+                    clientX:r.right-15, clientY:r.top+15}));
+            })()""", timeout_ms)
+            wait_ms(1000)
+            panel_check = json.loads(evaluate(page, """JSON.stringify((() => {
+                const c = document.querySelector('.flow-card');
+                const s = c.querySelector('.tilt-surface');
+                const r = c.getBoundingClientRect(), b = s.getBoundingClientRect();
+                return {transform:getComputedStyle(s).transform,
+                    border:getComputedStyle(s).borderTopWidth,
+                    background:getComputedStyle(s).backgroundColor,
+                    widthDelta:Math.abs(b.width-r.width), heightDelta:Math.abs(b.height-r.height),
+                    glare:Number(getComputedStyle(s.querySelector('.specular-glare')).opacity)};
+            })())""", timeout_ms))
+            if (panel_check['transform'] != 'none' or panel_check['border'] != '0px'
+                    or panel_check['background'] != 'rgba(0, 0, 0, 0)'
+                    or panel_check['widthDelta'] > 1 or panel_check['heightDelta'] > 1
+                    or panel_check['glare'] < .5):
+                raise AssertionError(f'Large panel double-shell regression: {panel_check!r}')
             if not view.grab().save(str(args.artifact_dir / 'qt-web-layout-dark.png'), 'PNG'):
                 raise OSError('Failed to save spacious dark layout screenshot')
+            evaluate(page, "document.getElementById('themeToggleBtn').click()", timeout_ms)
+            wait_ms(1500)
+            if not view.grab().save(str(args.artifact_dir / 'qt-web-panel-light.png'), 'PNG'):
+                raise OSError('Failed to save light panel hover screenshot')
             print(
                 json.dumps(
                     {

@@ -228,12 +228,13 @@ html.light .ambient-glow {
   left: -1px;
   z-index: -1;
   pointer-events: none;
-  border: 1px solid var(--border-subtle);
+  border: 0;
   border-radius: inherit;
-  background: inherit;
+  background: transparent;
+  overflow: hidden;
   transition: transform 0.18s ease-out, box-shadow 0.25s ease;
 }
-.tilt-card.is-tilting > .tilt-surface {
+.tilt-depth.is-tilting > .tilt-surface {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-hover);
 }
@@ -248,7 +249,7 @@ html.light .ambient-glow {
   bottom: 0;
   left: 0;
   border-radius: inherit;
-  background: radial-gradient(circle at var(--glare-x, 50%) var(--glare-y, 50%), rgba(255, 255, 255, 0.28), transparent 60%);
+  background: radial-gradient(ellipse 260px 180px at var(--glare-x, 50%) var(--glare-y, 50%), rgba(100, 140, 180, 0.07), transparent 100%);
   pointer-events: none;
   z-index: 10;
   opacity: 0;
@@ -259,10 +260,21 @@ html.light .ambient-glow {
   opacity: 1;
 }
 html.dark .specular-glare, [data-theme="dark"] .specular-glare {
-  background: radial-gradient(circle at var(--glare-x, 50%) var(--glare-y, 50%), rgba(56, 189, 248, 0.18), transparent 60%);
+  background: radial-gradient(ellipse 260px 180px at var(--glare-x, 50%) var(--glare-y, 50%), rgba(100, 180, 220, 0.065), transparent 100%);
 }
 
 .glass-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+}
+/* One visible outline: the compact card's shell, never a second fixed frame. */
+.glass-card.tilt-depth {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  transition: none;
+}
+.tilt-depth > .tilt-surface {
   background: var(--surface-card);
   border: 1px solid var(--border-subtle);
 }
