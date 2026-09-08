@@ -232,7 +232,8 @@ html.light .ambient-glow {
   border-radius: inherit;
   background: transparent;
   overflow: hidden;
-  transition: transform 0.18s ease-out, box-shadow 0.25s ease;
+  /* Never interpolate perspective matrices in Qt's older Chromium engine. */
+  transition: box-shadow 0.25s ease;
 }
 .tilt-depth.is-tilting > .tilt-surface {
   border-color: var(--border-strong);

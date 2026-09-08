@@ -321,6 +321,8 @@ def main() -> int:
                 const text = card.querySelector('.kpi-value').getBoundingClientRect();
                 render({statusOnly:true});
                 return {transform:getComputedStyle(card.querySelector('.tilt-surface')).transform,
+                    transition:getComputedStyle(card.querySelector('.tilt-surface')).transitionProperty,
+                    depth:Number(Math.abs(new DOMMatrix(getComputedStyle(card.querySelector('.tilt-surface')).transform).m13)),
                     textTransform:getComputedStyle(card).transform,
                     fixedBorder:getComputedStyle(card).borderTopColor,
                     fixedBackground:getComputedStyle(card).backgroundColor,
@@ -335,6 +337,7 @@ def main() -> int:
                     or tilt_check['textTransform'] != 'none' or not tilt_check['textUnmoved']
                     or tilt_check['fixedBorder'] != 'rgba(0, 0, 0, 0)'
                     or tilt_check['fixedBackground'] != 'rgba(0, 0, 0, 0)'
+                    or 'transform' in tilt_check['transition'] or tilt_check['depth'] < .02
                     or not tilt_check['sameCard']):
                 raise AssertionError(f"Tilt/mirror/progress repaint regression: {tilt_check!r}")
             evaluate(page, "window.__tiltCard.dispatchEvent(new MouseEvent('mouseleave'))", timeout_ms)
@@ -415,6 +418,45 @@ def main() -> int:
                 if layout['sectionGap'] < 27 or layout['overflow'] or layout['costOverflow']:
                     raise AssertionError(f'Layout regression at {width}px: {layout!r}')
             view.resize(1440, 1000)
+            evaluate(page, """(() => {
+                window.__stress = {done:false, samples:0, maxDisplacement:0, failures:[]};
+                const cards = [...document.querySelectorAll('.tilt-card')]
+                    .filter(c => c.getBoundingClientRect().width > 0);
+                let frame = 0;
+                function tick() {
+                    cards.forEach((c, i) => {
+                        const r = c.getBoundingClientRect();
+                        const s = c.querySelector(':scope > .tilt-surface');
+                        if (!s) return;
+                        const b = s.getBoundingClientRect();
+                        const displacement = Math.max(Math.abs(b.left-r.left), Math.abs(b.right-r.right),
+                            Math.abs(b.top-r.top), Math.abs(b.bottom-r.bottom));
+                        window.__stress.maxDisplacement = Math.max(window.__stress.maxDisplacement, displacement);
+                        window.__stress.samples++;
+                        if (!Number.isFinite(displacement) || displacement > 32)
+                            window.__stress.failures.push({frame, card:c.className, displacement});
+                        if (frame % 4 === 0) c.dispatchEvent(new MouseEvent('mouseleave'));
+                        else {
+                            c.dispatchEvent(new MouseEvent('mouseenter'));
+                            const flip = (frame+i)%2;
+                            c.dispatchEvent(new MouseEvent('mousemove', {
+                                clientX:flip?r.left+1:r.right-1, clientY:flip?r.bottom-1:r.top+1}));
+                        }
+                    });
+                    if (++frame < 120) requestAnimationFrame(tick);
+                    else {
+                        cards.forEach(c => c.dispatchEvent(new MouseEvent('mouseleave')));
+                        window.__stress.done = true;
+                    }
+                }
+                requestAnimationFrame(tick);
+            })()""", timeout_ms)
+            stress_deadline = monotonic() + 60
+            while not evaluate(page, 'window.__stress.done', timeout_ms) and monotonic() < stress_deadline:
+                wait_ms(100)
+            stress = json.loads(evaluate(page, 'JSON.stringify(window.__stress)', timeout_ms))
+            if not stress['done'] or stress['failures'] or stress['samples'] < 120:
+                raise AssertionError(f'Rapid pointer stress failed: {stress!r}')
             evaluate(page, "document.getElementById('themeToggleBtn').click(); window.scrollTo(0, 150)", timeout_ms)
             wait_ms(1500)
             evaluate(page, """(() => {
@@ -450,6 +492,7 @@ def main() -> int:
                 json.dumps(
                     {
                         "status": "PASS",
+                        "pointer_stress": stress,
                         "page_url": page_url,
                         "database": str(db_path),
                         "web_dir": str(web_dir),

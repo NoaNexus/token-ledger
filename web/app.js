@@ -2490,47 +2490,65 @@ function setupTiltCards() {
     let rect = null;
     let pointerX = 0;
     let pointerY = 0;
+    let angleX = 0;
+    let angleY = 0;
 
-    const reset = () => {
+    const animate = () => {
+      rafId = null;
+      if (!card.isConnected || prefersReducedMotion()) return reset(true);
+      let targetX = 0;
+      let targetY = 0;
+      if (rect && rect.width && rect.height) {
+        const x = Math.max(0, Math.min(rect.width, pointerX - rect.left));
+        const y = Math.max(0, Math.min(rect.height, pointerY - rect.top));
+        const amplitude = Math.min(4, 2200 / Math.max(rect.width, rect.height));
+        if (hasDepth) {
+          targetX = (y / rect.height * 2 - 1) * -amplitude;
+          targetY = (x / rect.width * 2 - 1) * amplitude;
+        }
+        card.style.setProperty('--glare-x', `${(x / rect.width * 100).toFixed(1)}%`);
+        card.style.setProperty('--glare-y', `${(y / rect.height * 100).toFixed(1)}%`);
+      }
+      // Ease bounded scalar angles, not a perspective matrix or its focal length.
+      angleX += (targetX - angleX) * .35;
+      angleY += (targetY - angleY) * .35;
+      const moving = Math.abs(targetX - angleX) + Math.abs(targetY - angleY) > .015;
+      if (!moving) { angleX = targetX; angleY = targetY; }
+      if (hasDepth) {
+        if (!rect && !moving) surface.style.removeProperty('transform');
+        else surface.style.transform = `perspective(1400px) rotateX(${angleX.toFixed(3)}deg) rotateY(${angleY.toFixed(3)}deg)`;
+      }
+      if (moving) rafId = requestAnimationFrame(animate);
+    };
+
+    const reset = (immediate = false) => {
       if (rafId) cancelAnimationFrame(rafId);
       rafId = null;
       rect = null;
       card.classList.remove("is-tilting");
-      surface.style.removeProperty("transform");
+      if (immediate) {
+        angleX = angleY = 0;
+        surface.style.removeProperty('transform');
+      } else if (hasDepth) rafId = requestAnimationFrame(animate);
     };
 
     card.addEventListener("mouseenter", () => {
-      if (prefersReducedMotion()) return reset();
+      if (prefersReducedMotion()) return reset(true);
       rect = card.getBoundingClientRect();
       card.classList.add("is-tilting");
     });
 
     card.addEventListener("mousemove", (e) => {
-      if (prefersReducedMotion()) return reset();
+      if (prefersReducedMotion()) return reset(true);
       if (!rect) rect = card.getBoundingClientRect();
       pointerX = e.clientX;
       pointerY = e.clientY;
 
       if (rafId) return;
-      rafId = requestAnimationFrame(() => {
-        rafId = null;
-        if (!rect) return;
-        if (!card.isConnected || prefersReducedMotion()) return reset();
-        const x = Math.max(0, Math.min(rect.width, pointerX - rect.left));
-        const y = Math.max(0, Math.min(rect.height, pointerY - rect.top));
-        if (!rect.width || !rect.height) return reset();
-        if (hasDepth) {
-          const amplitude = Math.min(1.4, 600 / Math.max(rect.width, rect.height));
-          const rotX = (y / rect.height * 2 - 1) * -amplitude;
-          const rotY = (x / rect.width * 2 - 1) * amplitude;
-          surface.style.transform = `perspective(2400px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
-        }
-        card.style.setProperty("--glare-x", `${((x / rect.width) * 100).toFixed(1)}%`);
-        card.style.setProperty("--glare-y", `${((y / rect.height) * 100).toFixed(1)}%`);
-      });
+      rafId = requestAnimationFrame(animate);
     });
 
-    card.addEventListener("mouseleave", reset);
+    card.addEventListener("mouseleave", () => reset());
   });
 }
 
