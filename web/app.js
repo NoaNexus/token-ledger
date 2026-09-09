@@ -417,23 +417,30 @@ async function getJson(url, options = {}) {
   return response.json();
 }
 
+let dashboardRequestSerial = 0;
 async function loadDashboard({ quiet = false } = {}) {
+  const requestSerial = ++dashboardRequestSerial;
   if (!quiet) {
     setLoading(true);
   }
   try {
     const query = new URLSearchParams({ days: state.range, agent: state.agent });
-    state.data = await getJson(`/api/dashboard?${query}`);
+    const dashboard = await getJson(`/api/dashboard?${query}`);
+    if (requestSerial !== dashboardRequestSerial) return;
+    state.data = dashboard;
     state.preview = false;
     if (elements.preview) elements.preview.hidden = true;
     if (elements.error) elements.error.hidden = true;
     setConnection("live", "本机已连接");
     try {
-      state.diagnostics = await getJson("/api/diagnostics");
+      const diagnostics = await getJson("/api/diagnostics");
+      if (requestSerial !== dashboardRequestSerial) return;
+      state.diagnostics = diagnostics;
     } catch {
-      state.diagnostics = null;
+      if (requestSerial === dashboardRequestSerial) state.diagnostics = null;
     }
   } catch (error) {
+    if (requestSerial !== dashboardRequestSerial) return;
     if (!state.data || !quiet) state.data = mockDashboard();
     state.preview = true;
     if (elements.preview) elements.preview.hidden = false;
@@ -441,9 +448,8 @@ async function loadDashboard({ quiet = false } = {}) {
     setConnection("preview", "预览数据模式");
     if (elements.errorMessage) elements.errorMessage.textContent = error.message || "无法读取本地接口";
   } finally {
-    if (!quiet) {
-      setLoading(false);
-    }
+    if (requestSerial !== dashboardRequestSerial) return;
+    setLoading(false);
     render();
     if (!state.preview && state.data?.meta?.scan?.status === "scanning" && !state.polling) {
       startPolling();

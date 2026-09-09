@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterator, Sequence
 
 from .models import ParsedFile, ProviderProbe, QuotaSnapshot
+from .providers.common import stable_id
 
 
 SCHEMA = """
@@ -153,7 +154,18 @@ class TokenDatabase:
         parsed: ParsedFile,
         scanned_at: str,
     ) -> None:
+        preserve_history = agent == 'codex' and parsed.metadata.get('codex_history_v2') is True
         with self.connect() as connection:
+            existing_history = []
+            if preserve_history:
+                existing_history = connection.execute(
+                    """
+                    SELECT event_id,occurred_at,input_tokens,cached_input_tokens,
+                           cache_write_tokens,output_tokens,reasoning_tokens,total_tokens
+                    FROM usage_events WHERE file_id=?
+                    """,
+                    (file_id,),
+                ).fetchall()
             connection.execute(
                 """
                 INSERT INTO file_states(file_id,agent,path_hint,mtime_ns,size_bytes,event_count,session_count,last_scan,status,message)
@@ -177,15 +189,108 @@ class TokenDatabase:
                     "",
                 ),
             )
-            connection.execute("DELETE FROM usage_events WHERE file_id = ?", (file_id,))
+            if preserve_history:
+                # Upgrade path: retain old observations when a source log was
+                # shortened. Remove only rows matched to current events or to
+                # parser-proven inherited fork signatures.
+                history_rows = [
+                    row for row in existing_history
+                    if not (
+                        str(row["event_id"]).startswith("codex-v2:c:")
+                        or str(row["event_id"]).startswith("codex-v2:l:")
+                    )
+                ]
+                legacy_candidates = [
+                    row for row in history_rows
+                    if not str(row["event_id"]).startswith("codex-v2:h:")
+                ]
+                used_history: set[str] = set()
+                def event_signature(event):
+                    return (
+                        event.occurred_at, event.input_tokens,
+                        event.cached_input_tokens, event.cache_write_tokens,
+                        event.output_tokens, event.reasoning_tokens,
+                        event.total_tokens,
+                    )
+                for event in parsed.events:
+                    signature = event_signature(event)
+                    for row in history_rows:
+                        if row["event_id"] in used_history:
+                            continue
+                        if tuple(row[key] for key in (
+                            "occurred_at", "input_tokens", "cached_input_tokens",
+                            "cache_write_tokens", "output_tokens",
+                            "reasoning_tokens", "total_tokens"
+                        )) == signature:
+                            used_history.add(row["event_id"])
+                            break
+                inherited_signatures = [
+                    tuple(signature)
+                    for signature in parsed.metadata.get("codex_inherited_signatures", [])
+                    if isinstance(signature, (list, tuple)) and len(signature) == 6
+                ]
+                for signature in inherited_signatures:
+                    for row in legacy_candidates:
+                        if row["event_id"] in used_history:
+                            continue
+                        row_signature = tuple(row[key] for key in (
+                            "input_tokens", "cached_input_tokens", "cache_write_tokens",
+                            "output_tokens", "reasoning_tokens", "total_tokens"
+                        ))
+                        if row_signature == signature:
+                            used_history.add(row["event_id"])
+                            break
+                # A source may have been shortened after the old scan, so the
+                # current file may no longer contain the copied prefix. Parent
+                # per-call shapes let migration remove only the old rows that
+                # have direct parent evidence; all other old observations stay.
+                for encoded in parsed.metadata.get("codex_parent_usage_signatures", []):
+                    if not isinstance(encoded, (list, tuple)) or len(encoded) != 7:
+                        continue
+                    signature = tuple(encoded[:6])
+                    try:
+                        count = max(0, int(encoded[6]))
+                    except (TypeError, ValueError):
+                        continue
+                    for _ in range(count):
+                        for row in legacy_candidates:
+                            if row["event_id"] in used_history:
+                                continue
+                            row_signature = tuple(row[key] for key in (
+                                "input_tokens", "cached_input_tokens", "cache_write_tokens",
+                                "output_tokens", "reasoning_tokens", "total_tokens"
+                            ))
+                            if row_signature == signature:
+                                used_history.add(row["event_id"])
+                                break
+                connection.executemany(
+                    "DELETE FROM usage_events WHERE file_id=? AND event_id=?",
+                    [(file_id, event_id) for event_id in used_history],
+                )
+                connection.executemany('DELETE FROM usage_events WHERE file_id=? AND event_id=?',
+                                       [(file_id, event_id) for event_id in parsed.metadata.get('codex_inherited_ids', [])])
+                for row in history_rows:
+                    if row["event_id"] in used_history:
+                        continue
+                    history_id = "codex-v2:h:" + stable_id(
+                        file_id, row["event_id"], row["occurred_at"],
+                        row["input_tokens"], row["cached_input_tokens"],
+                        row["cache_write_tokens"], row["output_tokens"],
+                        row["reasoning_tokens"], row["total_tokens"],
+                    )
+                    connection.execute(
+                        "UPDATE usage_events SET event_id=? WHERE file_id=? AND event_id=?",
+                        (history_id, file_id, row["event_id"]),
+                    )
+            else:
+                connection.execute("DELETE FROM usage_events WHERE file_id = ?", (file_id,))
             connection.executemany(
-                """
-                INSERT INTO usage_events(
+                """INSERT INTO usage_events(
                   event_id,file_id,agent,route,platform,model,session_id,occurred_at,
                   input_tokens,cached_input_tokens,cache_write_tokens,output_tokens,
                   reasoning_tokens,total_tokens,usage_mode,usage_scope,call_count
                 ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
+                """ + (" ON CONFLICT(event_id) DO UPDATE SET file_id=excluded.file_id" if preserve_history else ""),
                 [
                     (
                         event.event_id,
@@ -209,6 +314,8 @@ class TokenDatabase:
                     for event in parsed.events
                 ],
             )
+            if preserve_history:
+                connection.execute("UPDATE file_states SET event_count=(SELECT COUNT(*) FROM usage_events WHERE file_id=?) WHERE file_id=?", (file_id, file_id))
             for quota in parsed.quotas:
                 connection.execute(
                     """
@@ -299,7 +406,14 @@ class TokenDatabase:
     def remove_missing_files(self, agent: str, seen_file_ids: set[str]) -> None:
         with self.connect() as connection:
             existing = [row[0] for row in connection.execute("SELECT file_id FROM file_states WHERE agent = ?", (agent,))]
-            missing = [(file_id,) for file_id in existing if file_id not in seen_file_ids]
+            retained = set()
+            if agent == 'codex':
+                retained = {row[0] for row in connection.execute("SELECT DISTINCT file_id FROM usage_events WHERE agent='codex' AND event_id LIKE 'codex-v2:%'")}
+                for file_id in retained - seen_file_ids:
+                    connection.execute("UPDATE file_states SET status='retained',message='源日志暂不可见，保留已确认的历史用量' WHERE file_id=?", (file_id,))
+                # A moved log owns the same event IDs, never another copy.
+                connection.execute("UPDATE file_states SET event_count=(SELECT COUNT(*) FROM usage_events WHERE usage_events.file_id=file_states.file_id) WHERE agent='codex'")
+            missing = [(file_id,) for file_id in existing if file_id not in seen_file_ids and file_id not in retained]
             connection.executemany("DELETE FROM file_states WHERE file_id = ?", missing)
         self._internal_version += 1
 
