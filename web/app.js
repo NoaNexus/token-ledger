@@ -476,6 +476,13 @@ function render({ statusOnly = false } = {}) {
   if (!state.data) return;
   const { data } = state;
 
+  if (data?.meta?.version) {
+    const brandPill = document.querySelector(".brand-tag-pill");
+    if (brandPill) {
+      brandPill.textContent = `v${data.meta.version}`;
+    }
+  }
+
   if (elements.toolbarMeta) {
     elements.toolbarMeta.textContent = `${data.meta.range.start} → ${data.meta.range.end} · 上次扫描 ${formatDateTime(data.meta.scan.last_completed_at)}`;
   }

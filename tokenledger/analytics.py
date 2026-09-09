@@ -12,6 +12,7 @@ try:
 except ImportError:  # Python 3.8 or an incomplete standard-library install.
     _ZoneInfo = None
 
+from . import __version__
 from .db import TokenDatabase
 from .registry import REGISTRY
 
@@ -503,6 +504,7 @@ def build_dashboard(
 
     payload = {
         "meta": {
+            "version": __version__,
             "generated_at": now.isoformat().replace("+00:00", "Z"),
             "range": {"start": start_date.isoformat(), "end": local_today.isoformat(), "days": range_days},
             "scan": scan_status,

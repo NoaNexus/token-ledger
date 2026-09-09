@@ -9,8 +9,9 @@ from typing import Any
 from .config import default_data_dir
 
 
+from . import __version__ as APP_VERSION
+
 APP_NAME = "Token 账本"
-APP_VERSION = "2.4.4"
 _INSTANCE_HANDLE: int | None = None
 
 
