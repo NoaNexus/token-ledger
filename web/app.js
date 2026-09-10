@@ -530,23 +530,7 @@ function render({ statusOnly = false } = {}) {
 function populateAgents(agents) {
   const countAll = $("#agentCountAll");
   if (countAll) countAll.textContent = `(${agents.length})`;
-
-  // Update pills active state
-  $$("[data-agent-filter]").forEach((pill) => {
-    pill.classList.toggle("is-active", (pill.dataset.agentFilter || "all") === state.agent);
-  });
-
-  const dot = $("#rangeIndicatorDot");
-  if (dot) {
-    dot.style.background = AGENT_COLORS[state.agent] || "#3B82F6";
-    dot.style.boxShadow = `0 0 8px ${AGENT_COLORS[state.agent] || "#3B82F6"}80`;
-  }
-  const label = $("#currentRangeLabel");
-  if (label) {
-    const rName = state.range === "1" ? "今天 (24h)" : state.range === "7" ? "最近 7 天" : state.range === "all" ? "全部历史" : "最近 30 天";
-    const aName = state.agent === "all" ? "全量智能体" : state.agent === "codex" ? "Codex 专属" : state.agent === "claude" ? "Claude Code 专属" : "Antigravity 专属";
-    label.textContent = `用量观察窗口 · ${rName} · ${aName}`;
-  }
+  syncAgentPills(state.agent);
 }
 
 /* ==========================================================================
@@ -556,6 +540,9 @@ function renderOverview(data) {
   if (!elements.overview) return;
   const summary = data.summary;
   const lifetime = data.lifetime?.summary || summary;
+  const activeAgent = state.agent !== "all" ? data.agents.find((a) => a.id === state.agent) : null;
+  const activeColor = activeAgent ? safeColor(activeAgent.color, AGENT_COLORS[activeAgent.id]) : "#3B82F6";
+  const activeName = activeAgent ? activeAgent.name : null;
 
   const quotaAgent = (state.agent !== "all" ? data.agents.find((a) => a.id === state.agent) : null)
     || data.agents.find((a) => a.quota && a.quota.status !== "unavailable")
@@ -578,10 +565,10 @@ function renderOverview(data) {
         <div class="glass-card kpi-card">
           <div class="kpi-head">
             <span class="kpi-label">
-              <span class="kpi-dot" style="background:#3B82F6"></span>
-              全周期累计 Token
+              <span class="kpi-dot" style="background:${activeColor}"></span>
+              ${activeName ? `${escapeHtml(activeName)} 全周期累计` : "全周期累计 Token"}
             </span>
-            <span class="pill-badge pill-badge--blue">全部历史</span>
+            <span class="pill-badge pill-badge--blue" style="${activeAgent ? `border-color:${activeColor}66;color:${activeColor}` : ''}">${activeName ? `${escapeHtml(activeName)} 专属历史</span>` : "全部历史</span>"}
           </div>
           <div>
             <div class="kpi-value mono" title="${Number(lifetime.total || 0).toLocaleString("zh-CN")}">${compactNumber(lifetime.total)}</div>
@@ -595,8 +582,12 @@ function renderOverview(data) {
             </div>
           </div>
           <div class="kpi-foot">
-            <span>含 Antigravity 估算</span>
-            <span class="mono">${compactNumber(lifetime.estimated_total || 0)} (${formatPercent(ratioToPercent((lifetime.estimated_total || 0) / (lifetime.total || 1)))})</span>
+            ${activeAgent
+              ? `<span>${activeAgent.id === 'antigravity' ? 'DeepMind 原生架构解析' : activeAgent.id === 'claude' ? 'CC Switch 聚合核算' : 'OpenAI 会话历史'}</span>
+                 <span class="mono">${Number(lifetime.sessions || 0).toLocaleString("zh-CN")} 会话 · ${Number(lifetime.calls || 0).toLocaleString("zh-CN")} 请求</span>`
+              : `<span>含 Antigravity 估算</span>
+                 <span class="mono">${compactNumber(lifetime.estimated_total || 0)} (${formatPercent(ratioToPercent((lifetime.estimated_total || 0) / (lifetime.total || 1)))})</span>`
+            }
           </div>
         </div>
 
@@ -604,13 +595,15 @@ function renderOverview(data) {
         <div class="glass-card kpi-card">
           <div class="kpi-head">
             <span class="kpi-label">
-              <span class="kpi-dot" style="background:#6366F1"></span>
-              范围净用量
+              <span class="kpi-dot" style="background:${activeAgent ? activeColor : '#6366F1'}"></span>
+              ${activeName ? `${escapeHtml(activeName)} 范围净用量` : "范围净用量"}
               <span class="kpi-info-icon" title="计算公式：实际净用量 = (总输入 − 缓存读取) + 模型输出&#10;缓存读取与净用量均按本机日志中的结构化字段计算；缺失字段会标记为未提供。">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
               </span>
             </span>
-            <span class="pill-badge pill-badge--blue">净用量核算基准</span>
+            <span class="pill-badge pill-badge--blue">
+              ${activeName ? "专属核算基准" : "净用量核算基准"}
+            </span>
           </div>
           <div>
             <div class="kpi-value mono" style="color:#60A5FA" title="${Number(summary.net_usage || 0).toLocaleString("zh-CN")}">${compactNumber(summary.net_usage)}</div>
@@ -634,9 +627,11 @@ function renderOverview(data) {
           <div class="kpi-head">
             <span class="kpi-label">
               <span class="kpi-dot" style="background:#10B981"></span>
-              缓存命中效率
+              ${activeName ? `${escapeHtml(activeName)} 缓存效率` : "缓存命中效率"}
             </span>
-            <span class="pill-badge pill-badge--emerald">读取比例</span>
+            <span class="pill-badge pill-badge--emerald">
+              ${activeName ? "专属读取" : "读取比例"}
+            </span>
           </div>
           <div>
             <div class="kpi-value mono" style="color:#34D399">${formatPercent(ratioToPercent(summary.cache_hit_rate))}</div>
@@ -686,9 +681,11 @@ function renderOverview(data) {
           <div class="flow-title-group">
             <h2>
               <span>Token 流量转换轨道</span>
-              <span class="pill-badge pill-badge--blue" style="font-size:10px">Pipeline 流转模型</span>
+              <span class="pill-badge pill-badge--blue" style="font-size:10px">
+                ${activeName ? `${escapeHtml(activeName)} 专属流转` : "Pipeline 流转模型"}
+              </span>
             </h2>
-            <p>从上下文输入到缓存过滤，再到模型生成及最终有效净用量的全透明流转</p>
+            <p>${activeName ? `聚焦 ${escapeHtml(activeName)} 从上下文输入到缓存过滤，再到模型生成及最终有效净用量的全透明流转` : "从上下文输入到缓存过滤，再到模型生成及最终有效净用量的全透明流转"}</p>
           </div>
           <div class="flow-formula-badge">
             净用量 = (输入 − 缓存读取) + 输出
@@ -752,8 +749,8 @@ function renderOverview(data) {
 
       <!-- Analytics Grid (Spline Trend Chart + Model Ranking) -->
       <div class="analytics-grid">
-        ${trendPanel(data.daily)}
-        ${rankingPanel(data.models, data.agents)}
+        ${trendPanel(data.daily, activeAgent)}
+        ${rankingPanel(data.models, data.agents, activeAgent)}
       </div>
 
       <!-- 3-Column Agent Ledger Cards -->
@@ -792,10 +789,8 @@ function renderOverview(data) {
 
   $$("[data-open-agent]").forEach((button) =>
     button.addEventListener("click", () => {
-      state.agent = button.dataset.openAgent;
-      if (elements.agentFilter) elements.agentFilter.value = state.agent;
+      selectAgent(button.dataset.openAgent);
       activateTab("detail");
-      loadDashboard({ quiet: true });
     })
   );
   // Bind direct clicking on agent cards to filter and spotlight
@@ -805,8 +800,7 @@ function renderOverview(data) {
       const agentId = card.dataset.agentId;
       if (!agentId) return;
       const targetAgent = state.agent === agentId ? "all" : agentId;
-      const targetPill = $(`[data-agent-filter="${targetAgent}"]`);
-      if (targetPill) targetPill.click();
+      selectAgent(targetAgent);
     });
   });
 
@@ -817,9 +811,10 @@ function renderOverview(data) {
 /* ==========================================================================
    Trend Panel & Interactive Spline Chart
    ========================================================================== */
-function trendPanel(daily) {
+function trendPanel(daily, activeAgent = null) {
   const maxVal = Math.max(0, ...daily.map((d) => Number(d.total || 0)));
   const latest = daily[daily.length - 1] || {};
+  const aName = activeAgent ? activeAgent.name : null;
 
   return `
     <article class="glass-card trend-panel">
@@ -827,10 +822,10 @@ function trendPanel(daily) {
         <div class="trend-head">
           <div class="trend-title">
             <h3>
-              <span>每日用量脉冲与趋势（精确到日）</span>
+              <span>每日用量脉冲与趋势${aName ? ` · ${escapeHtml(aName)} 专属` : "（精确到日）"}</span>
               <span class="status-dot status-dot--live" style="width:6px;height:6px"></span>
             </h3>
-            <p>光标滑动查看任意单日输入、缓存命中与输出细分（零模糊 60fps 渲染）</p>
+            <p>${aName ? `聚焦 ${escapeHtml(aName)} 光标滑动查看单日输入、缓存命中与输出细分（零模糊 60fps 渲染）` : "光标滑动查看任意单日输入、缓存命中与输出细分（零模糊 60fps 渲染）"}</p>
           </div>
           <div class="trend-legend">
             <div style="display:flex;align-items:center;gap:6px">
@@ -1066,10 +1061,11 @@ function renderSplineChart(daily) {
 /* ==========================================================================
    Model Ranking Panel
    ========================================================================== */
-function rankingPanel(models, agents) {
+function rankingPanel(models, agents, activeAgent = null) {
   const colors = Object.fromEntries(
     agents.map((agent) => [agent.id, safeColor(agent.color, AGENT_COLORS[agent.id])])
   );
+  const aName = activeAgent ? activeAgent.name : null;
 
   const stackedSegs = models
     .slice(0, 5)
@@ -1109,8 +1105,8 @@ function rankingPanel(models, agents) {
     <article class="glass-card ranking-panel">
       <div>
         <div class="ranking-head">
-          <h3>模型分布与 API 参考估算</h3>
-          <span style="font-size:11px;color:var(--text-tertiary)">API 参考估算</span>
+          <h3>模型分布与 API 参考估算${aName ? ` · ${escapeHtml(aName)}` : ""}</h3>
+          <span style="font-size:11px;color:var(--text-tertiary)">${aName ? `${escapeHtml(aName)} 维度` : "API 参考估算"}</span>
         </div>
 
         <div class="stacked-bar">
@@ -1144,7 +1140,9 @@ function agentCard(agent, lifetime = agent) {
   const isDimmed = state.agent !== "all" && state.agent !== agent.id;
   const isAntigravity = agent.id === "antigravity";
 
-  const statusBadge = isAntigravity
+  const statusBadge = isSpotlight
+    ? `<span class="pill-badge pill-badge--blue" style="border-color:${color};color:${color};font-weight:700">★ 当前聚焦</span>`
+    : isAntigravity
     ? `<span class="pill-badge pill-badge--purple" title="Google DeepMind 原生架构 · 1M 超长上下文">DeepMind 模型分组 · 1M 窗口</span>`
     : `<span class="pill-badge ${estimated ? 'pill-badge--purple' : hasAccountRollup ? 'pill-badge--orange' : 'pill-badge--emerald'}">
         ${estimated ? "本地文本估算" : hasAccountRollup ? "已合并日汇总" : escapeHtml(statusText(agent.status))}
@@ -1189,7 +1187,7 @@ function agentCard(agent, lifetime = agent) {
     `;
 
   return `
-    <article class="glass-card agent-card ${isSpotlight ? 'is-spotlight' : isDimmed ? 'is-dimmed' : ''}" data-agent-id="${agent.id}" style="border-color:${color}44;--card-glow-color:${color};cursor:pointer" title="点击直接按此智能体筛选">
+    <article class="glass-card agent-card ${isSpotlight ? 'is-spotlight' : isDimmed ? 'is-dimmed' : ''}" data-agent-id="${agent.id}" style="border-color:${color}44;--card-glow-color:${color};cursor:pointer" title="${isSpotlight ? '当前已聚焦此智能体，点击可恢复全部' : `点击聚焦 ${escapeHtml(agent.name)} 专属用量`}">
       <div class="agent-card-top">
         <div class="agent-card-title">
           <div class="agent-badge-icon" style="background:${color}20;color:${color}">${agent.short || agent.name.slice(0, 2).toUpperCase()}</div>
@@ -1201,7 +1199,7 @@ function agentCard(agent, lifetime = agent) {
       <div class="agent-total-block">
         <div class="agent-total mono" style="${estimated ? 'color:#D8B4FE' : ''}">${compactNumber(agent.total)}</div>
         <div class="agent-total-meta">
-          <span>范围用量</span>
+          <span>${isDimmed ? "范围用量 (非聚焦)" : "范围用量"}</span>
           <span class="mono">累计 ${compactNumber(lifetime?.total || 0)}</span>
         </div>
       </div>
@@ -1524,6 +1522,7 @@ function sourceStrip(data) {
    ========================================================================= */
 function renderDetail(data) {
   if (!elements.detail) return;
+  const activeAgent = state.agent !== "all" ? data.agents.find((a) => a.id === state.agent) : null;
   const selected = state.agent === "all" ? data.agents : data.agents.filter((a) => a.id === state.agent);
   const focus = selected[0] || data.agents[0];
   const codexAgent = data.agents.find((a) => a.id === "codex");
@@ -1546,7 +1545,9 @@ function renderDetail(data) {
       <article class="glass-card detail-table-card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
           <div>
-            <h2 style="font-size:16px;font-weight:700;color:var(--text-primary)">智能体用量全景核算</h2>
+            <h2 style="font-size:16px;font-weight:700;color:var(--text-primary)">
+              智能体用量全景核算${activeAgent ? ` · <span style="color:${AGENT_COLORS[activeAgent.id] || '#3B82F6'}">${escapeHtml(activeAgent.name)} 专属视图</span>` : ""}
+            </h2>
             <p style="font-size:12px;color:var(--text-secondary);margin-top:2px">多源规整：输入、缓存读取、输出、推理输出全分离，结合去重规则透明展示</p>
           </div>
           <span class="pill-badge pill-badge--blue">${escapeHtml(rangeText(state.range))}</span>
@@ -1575,6 +1576,10 @@ function renderDetail(data) {
                 const estimated = agent.contains_estimates || agent.metadata?.usage_mode === "estimated";
                 const hasRollup = Boolean(agent.reconciliation?.has_account_rollup);
 
+                const isSelected = state.agent === agent.id;
+                const isOther = state.agent !== "all" && !isSelected;
+                const rowClass = isSelected ? "is-selected-agent" : isOther ? "is-other-agent" : "";
+
                 const modeLabel = isAg ? (estimated ? "本地文本估算" : "DeepMind 原生直连解析") : estimated ? "可见文本估算" : hasRollup ? "CC Switch 账户汇总" : "结构化日志";
                 const modePillClass = isAg ? "pill-badge--purple" : estimated ? "pill-badge--purple" : hasRollup ? "pill-badge--orange" : "pill-badge--blue";
                 const cacheReadText = (isAg && estimated) ? "免频繁截断" : compactNumber(agent.cached_input);
@@ -1586,11 +1591,12 @@ function renderDetail(data) {
                   : `${(agent.account_days || agent.reconciliation?.account_days || 0)} 天 / ${agent.calls}`;
 
                 return `
-                <tr>
+                <tr class="${rowClass}" data-agent-filter="${agent.id}" style="cursor:pointer" title="点击聚焦 ${escapeHtml(agent.name)}">
                   <td style="padding-left:8px;font-weight:700;color:var(--text-primary);font-family:var(--font-sans)">
                     <span style="display:inline-flex;align-items:center;gap:6px">
                       <span class="kpi-dot" style="background:${color}"></span>
                       ${escapeHtml(agent.name)}
+                      ${isSelected ? `<span class="pill-badge pill-badge--blue" style="font-size:10px;padding:1px 6px">★ 当前聚焦</span>` : ''}
                     </span>
                   </td>
                   <td style="font-family:var(--font-sans)">
@@ -1615,17 +1621,17 @@ function renderDetail(data) {
       </article>
 
       <!-- 1. OpenAI Codex 专属全景看板 -->
-      <div id="section-codex">
+      <div id="section-codex" style="${(state.agent === 'all' || state.agent === 'codex') ? '' : 'display:none'}">
         ${renderCodexSection(codexAgent, data)}
       </div>
 
       <!-- 2. Claude Code & CC Switch 专属全景看板 -->
-      <div id="section-claude">
+      <div id="section-claude" style="${(state.agent === 'all' || state.agent === 'claude') ? '' : 'display:none'}">
         ${renderClaudeSection(claudeAgent, data)}
       </div>
 
       <!-- 3. Google DeepMind Antigravity Agentic 专属全景看板 -->
-      <div id="section-antigravity">
+      <div id="section-antigravity" style="${(state.agent === 'all' || state.agent === 'antigravity') ? '' : 'display:none'}">
         ${renderAntigravitySection(agAgent, data)}
       </div>
 
@@ -1634,7 +1640,7 @@ function renderDetail(data) {
         
         <article class="glass-card" style="padding:24px">
           <div style="margin-bottom:14px">
-            <h3 style="font-size:16px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
+            <h3 style="font-size:16px;font-weight:700;color:var(--text-primary)">
               <span>官方额度窗口与重置机制</span>
               <span class="pill-badge pill-badge--amber">结构化来源</span>
             </h3>
@@ -1646,7 +1652,7 @@ function renderDetail(data) {
 
         <article class="glass-card" style="padding:24px">
           <div style="margin-bottom:14px">
-            <h3 style="font-size:16px;font-weight:700;color:var(--text-primary);display:flex;align-items:center;gap:8px">
+            <h3 style="font-size:16px;font-weight:700;color:var(--text-primary)">
               <span>防重用量与多源审计原则</span>
             <span class="pill-badge pill-badge--emerald">结构化字段检查</span>
             </h3>
@@ -1681,19 +1687,6 @@ function renderDetail(data) {
   const btnBottom = $("#btnBackToCurveBottom");
   if (btnTop) btnTop.addEventListener("click", () => activateTab("overview"));
   if (btnBottom) btnBottom.addEventListener("click", () => activateTab("overview"));
-
-  const jumpCodex = $("#btnJumpCodex");
-  if (jumpCodex) jumpCodex.addEventListener("click", () => {
-    scrollToSection($("#section-codex"));
-  });
-  const jumpClaude = $("#btnJumpClaude");
-  if (jumpClaude) jumpClaude.addEventListener("click", () => {
-    scrollToSection($("#section-claude"));
-  });
-  const jumpAg = $("#btnJumpAntigravity");
-  if (jumpAg) jumpAg.addEventListener("click", () => {
-    scrollToSection($("#section-antigravity"));
-  });
 }
 
 function renderCodexSection(codex, data) {
@@ -2433,37 +2426,63 @@ function setupTheme() {
   });
 }
 
+function selectAgent(agent) {
+  if (!agent) agent = "all";
+  state.agent = agent;
+  syncAgentPills(agent);
+
+  if (elements.main) {
+    elements.main.classList.add("is-filtering");
+  }
+
+  const agentNames = {
+    all: "全部智能体",
+    codex: "Codex",
+    claude: "Claude Code",
+    antigravity: "Antigravity DeepMind",
+  };
+  const aName = agentNames[agent] || agent;
+  toast(agent === "all" ? "已切换至全部智能体全景" : `已聚焦 ${aName} 专属用量`);
+
+  loadDashboard({ quiet: true }).finally(() => {
+    if (elements.main) {
+      elements.main.classList.remove("is-filtering");
+    }
+    if (state.tab === "detail" && state.agent !== "all") {
+      const targetSection = document.getElementById(`section-${state.agent}`);
+      if (targetSection) {
+        scrollToSection(targetSection);
+      }
+    }
+  });
+}
+
+function syncAgentPills(agent = state.agent) {
+  $$("[data-agent-filter]").forEach((b) => {
+    if (b.tagName === "BUTTON") {
+      b.classList.toggle("is-active", (b.dataset.agentFilter || "all") === agent);
+    }
+  });
+
+  const dot = $("#rangeIndicatorDot");
+  if (dot) {
+    dot.style.background = AGENT_COLORS[agent] || "#3B82F6";
+    dot.style.boxShadow = `0 0 8px ${AGENT_COLORS[agent] || "#3B82F6"}80`;
+  }
+  const label = $("#currentRangeLabel");
+  if (label) {
+    const rName = state.range === "1" ? "今天 (24h)" : state.range === "7" ? "最近 7 天" : state.range === "all" ? "全部历史" : "最近 30 天";
+    const aName = agent === "all" ? "全量智能体" : agent === "codex" ? "Codex 专属" : agent === "claude" ? "Claude Code 专属" : "Antigravity 专属";
+    label.textContent = `用量观察窗口 · ${rName} · ${aName}`;
+  }
+}
+
 function setupAgentPills() {
-  const pills = $$("[data-agent-filter]");
-  pills.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const agent = btn.dataset.agentFilter || "all";
-      state.agent = agent;
-      pills.forEach((b) => b.classList.toggle("is-active", (b.dataset.agentFilter || "all") === agent));
-
-      const dot = $("#rangeIndicatorDot");
-      if (dot) {
-        dot.style.background = AGENT_COLORS[agent] || "#3B82F6";
-        dot.style.boxShadow = `0 0 8px ${AGENT_COLORS[agent] || "#3B82F6"}80`;
-      }
-      const label = $("#currentRangeLabel");
-      if (label) {
-        const rName = state.range === "1" ? "今天 (24h)" : state.range === "7" ? "最近 7 天" : state.range === "all" ? "全部历史" : "最近 30 天";
-        const aName = agent === "all" ? "全量智能体" : agent === "codex" ? "Codex 专属" : agent === "claude" ? "Claude Code 专属" : "Antigravity 专属";
-        label.textContent = `用量观察窗口 · ${rName} · ${aName}`;
-      }
-
-      // If user is on detail tab and selects specific agent, scroll smoothly to its section!
-      if (state.tab === "detail" && agent !== "all") {
-        const targetSection = document.getElementById(`section-${agent}`);
-        if (targetSection) {
-          scrollToSection(targetSection);
-        }
-      }
-
-      toast(agent === "all" ? "已查看全部智能体用量" : `已聚焦 ${agent.toUpperCase()}`);
-      loadDashboard({ quiet: true });
-    });
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-agent-filter]");
+    if (!btn) return;
+    const agent = btn.dataset.agentFilter || "all";
+    selectAgent(agent);
   });
 }
 

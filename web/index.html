@@ -183,16 +183,20 @@
             </div>
 
             <!-- Detail Quick Nav Anchor Pills -->
-            <div class="agent-pill-group" role="group" aria-label="快速定位智能体">
-              <button class="agent-pill-btn" type="button" id="btnJumpCodex">
+            <div class="agent-pill-group segmented-control" role="radiogroup" aria-label="切换智能体视图">
+              <button class="segmented-btn agent-pill-btn is-active" type="button" data-agent-filter="all">
+                <span class="agent-dot" style="background:#3B82F6"></span>
+                <span>全部全景</span>
+              </button>
+              <button class="segmented-btn agent-pill-btn" type="button" data-agent-filter="codex">
                 <span class="agent-dot" style="background:#3B82F6"></span>
                 <span>Codex 全景</span>
               </button>
-              <button class="agent-pill-btn" type="button" id="btnJumpClaude">
+              <button class="segmented-btn agent-pill-btn" type="button" data-agent-filter="claude">
                 <span class="agent-dot" style="background:#F97316"></span>
                 <span>Claude & CC Switch</span>
               </button>
-              <button class="agent-pill-btn" type="button" id="btnJumpAntigravity">
+              <button class="segmented-btn agent-pill-btn" type="button" data-agent-filter="antigravity">
                 <span class="agent-dot" style="background:#8B5CF6"></span>
                 <span>Antigravity DeepMind</span>
               </button>

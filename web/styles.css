@@ -692,7 +692,7 @@ html.light .theme-icon--moon { display: none; }
   padding: 86px 24px 48px;
   flex: 1;
 }
-.agent-panorama-section, [data-panel], .panel-header-hero, section {
+.agent-panorama-section, [data-panel], .panel-header-hero, section, #section-codex, #section-claude, #section-antigravity {
   scroll-margin-top: 80px;
 }
 
@@ -1717,6 +1717,17 @@ html.light .theme-icon--moon { display: none; }
 .comparison-table td {
   padding: 16px 12px;
   line-height: 1.65;
+}
+.comparison-table tbody tr.is-selected-agent {
+  background-color: rgba(59, 130, 246, 0.08);
+}
+.comparison-table tbody tr.is-other-agent {
+  opacity: 0.45;
+}
+.workspace.is-filtering {
+  opacity: 0.65;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
 }
 .detail-split-grid {
   display: grid;
