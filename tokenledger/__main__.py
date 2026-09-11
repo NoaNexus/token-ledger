@@ -55,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--scan-only", action="store_true")
     parser.add_argument("--force", action="store_true", help="Reparse every discovered file")
-    parser.add_argument("--scan-interval", type=int, default=60, help="Seconds between automatic incremental scans; 0 disables")
+    parser.add_argument("--scan-interval", type=int, default=0, help="Seconds between automatic incremental scans; 0 disables (default: 0)")
     return parser.parse_args()
 
 

@@ -42,21 +42,23 @@ def _fit_window_geometry(
 def _start_scan_scheduler(
     scanner: ScanCoordinator,
     *,
-    initial_delay: float = 3.5,
-    interval: float = 60.0,
+    initial_delay: float = 2.0,
+    interval: float = 0.0,
     force: bool = False,
 ) -> tuple[threading.Event, threading.Thread]:
-    """Start stoppable desktop scans without keeping the process alive at shutdown."""
+    """Start desktop startup scan once after initial_delay; subsequent scans are purely manual."""
     stop_event = threading.Event()
     delay = max(0.0, float(initial_delay))
-    period = max(0.01, float(interval))
 
     def run() -> None:
         if stop_event.wait(delay):
             return
         scanner.start_background(force=force)
-        while not stop_event.wait(period):
-            scanner.start_background()
+        # Only run recurring scans if an explicit positive interval is passed (e.g. in test suites)
+        if interval > 0:
+            period = max(0.01, float(interval))
+            while not stop_event.wait(period):
+                scanner.start_background()
 
     thread = threading.Thread(target=run, daemon=True, name="tokenledger-desktop-scan")
     thread.start()
@@ -110,9 +112,11 @@ def run_desktop() -> int:
     server_thread.start()
     window_url = local_server_url(server)
 
-    # 5. Start a stoppable initial + 60-second incremental scan schedule.
+    # 5. Start single initial scan on startup; subsequent scans are purely manual.
     scan_stop, scan_thread = _start_scan_scheduler(
         scanner,
+        initial_delay=2.0,
+        interval=0.0,
         force="--force" in sys.argv,
     )
 

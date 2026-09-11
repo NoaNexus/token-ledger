@@ -196,6 +196,12 @@ function rangeText(range) {
   );
 }
 
+function rangeBadgeText(range) {
+  return (
+    { "1": "今天 (24h)", "7": "7 天区间", "30": "30 天区间", all: "全部历史" }[String(range)] || `最近 ${range} 天`
+  );
+}
+
 let toastTimer;
 function toast(message) {
   clearTimeout(toastTimer);
@@ -501,6 +507,7 @@ function render({ statusOnly = false } = {}) {
   // Polling progress must not replace cards underneath an active pointer.
   if (statusOnly) return;
   try {
+    syncRangePills(state.range);
     populateAgents(data.agents);
   } catch (e) {
     console.error("populateAgents error:", e);
@@ -555,38 +562,57 @@ function renderOverview(data) {
     : (quotaAvailable ? formatPercent(quotaPercent) : "未下发");
   const isHealthy = quotaAvailable && quota.status === "fresh" && quotaPercent != null && quotaPercent >= 20;
 
+  const isAllRange = state.range === "all";
+  const rangeTitles = {
+    "1": "今日用量 Token",
+    "7": "最近 7 天 Token",
+    "30": "最近 30 天 Token",
+    "all": "全周期累计 Token",
+  };
+  const badgeText = rangeBadgeText(state.range);
+  const card1Label = activeName
+    ? `${escapeHtml(activeName)} · ${isAllRange ? "全周期累计" : state.range === "1" ? "今日用量" : state.range === "7" ? "7天用量" : "30天用量"}`
+    : (rangeTitles[state.range] || "范围用量 Token");
+  const card1Badge = activeName
+    ? `${escapeHtml(activeName)} ${badgeText}`
+    : badgeText;
+
   elements.overview.innerHTML = `
     <div class="overview-stack">
       
       <!-- 4 Top KPI Cards (Zero Font Blur) -->
       <div class="kpi-grid">
         
-        <!-- Card 1: 全周期累计 -->
+        <!-- Card 1: 范围总量 / 全周期累计 -->
         <div class="glass-card kpi-card">
           <div class="kpi-head">
             <span class="kpi-label">
               <span class="kpi-dot" style="background:${activeColor}"></span>
-              ${activeName ? `${escapeHtml(activeName)} 全周期累计` : "全周期累计 Token"}
+              ${card1Label}
             </span>
-            <span class="pill-badge pill-badge--blue" style="${activeAgent ? `border-color:${activeColor}66;color:${activeColor}` : ''}">${activeName ? `${escapeHtml(activeName)} 专属历史</span>` : "全部历史</span>"}
+            <span class="pill-badge pill-badge--blue" style="${activeAgent ? `border-color:${activeColor}66;color:${activeColor}` : ''}">${card1Badge}</span>
           </div>
           <div>
-            <div class="kpi-value mono" title="${Number(lifetime.total || 0).toLocaleString("zh-CN")}">${compactNumber(lifetime.total)}</div>
+            <div class="kpi-value mono" title="${Number(summary.total || 0).toLocaleString("zh-CN")}">${compactNumber(summary.total)}</div>
             <div class="kpi-sub">
-              <span>已索引：${Number(lifetime.total || 0).toLocaleString("zh-CN")}</span>
-              <span class="mono" style="color:#34D399;font-weight:600">${Number(lifetime.sessions || 0).toLocaleString("zh-CN")} 会话 · ${Number(lifetime.calls || 0).toLocaleString("zh-CN")} 请求</span>
+              <span>已核对：${Number(summary.total || 0).toLocaleString("zh-CN")}</span>
+              <span class="mono" style="color:#34D399;font-weight:600">${Number(summary.sessions || 0).toLocaleString("zh-CN")} 会话 · ${Number(summary.calls || 0).toLocaleString("zh-CN")} 请求</span>
             </div>
-            <div class="kpi-cost-badge" title="全周期用量的 API 参考估算">
-              <span>${costQualifier(lifetime)}:</span>
-              <strong style="color:var(--text-primary)">${escapeHtml(costInlineText(lifetime))}</strong>
+            <div class="kpi-cost-badge" title="${isAllRange ? '全周期用量的 API 参考估算' : '所选时间范围内的 API 参考估算'}">
+              <span>${costQualifier(summary)}:</span>
+              <strong style="color:var(--text-primary)">${escapeHtml(costInlineText(summary))}</strong>
             </div>
           </div>
           <div class="kpi-foot">
-            ${activeAgent
-              ? `<span>${activeAgent.id === 'antigravity' ? 'DeepMind 原生架构解析' : activeAgent.id === 'claude' ? 'CC Switch 聚合核算' : 'OpenAI 会话历史'}</span>
-                 <span class="mono">${Number(lifetime.sessions || 0).toLocaleString("zh-CN")} 会话 · ${Number(lifetime.calls || 0).toLocaleString("zh-CN")} 请求</span>`
-              : `<span>含 Antigravity 估算</span>
-                 <span class="mono">${compactNumber(lifetime.estimated_total || 0)} (${formatPercent(ratioToPercent((lifetime.estimated_total || 0) / (lifetime.total || 1)))})</span>`
+            ${isAllRange
+              ? (activeAgent
+                  ? `<span>${activeAgent.id === 'antigravity' ? 'DeepMind 原生架构解析' : activeAgent.id === 'claude' ? 'CC Switch 聚合核算' : 'OpenAI 会话历史'}</span>
+                     <span class="mono">${Number(lifetime.sessions || 0).toLocaleString("zh-CN")} 会话 · ${Number(lifetime.calls || 0).toLocaleString("zh-CN")} 请求</span>`
+                  : `<span>含 Antigravity 估算</span>
+                     <span class="mono">${compactNumber(lifetime.estimated_total || 0)} (${formatPercent(ratioToPercent((lifetime.estimated_total || 0) / (lifetime.total || 1)))})</span>`
+                )
+              : `<span>全周期历史累计: <strong class="mono" style="color:var(--text-primary)">${compactNumber(lifetime.total)}</strong></span>
+                 <span class="mono" style="color:var(--text-tertiary)">历史共 ${Number(lifetime.sessions || 0).toLocaleString("zh-CN")} 会话</span>`
             }
           </div>
         </div>
@@ -602,7 +628,7 @@ function renderOverview(data) {
               </span>
             </span>
             <span class="pill-badge pill-badge--blue">
-              ${activeName ? "专属核算基准" : "净用量核算基准"}
+              ${activeName ? `${badgeText} 专属核算` : `${badgeText} 净核算`}
             </span>
           </div>
           <div>
@@ -630,7 +656,7 @@ function renderOverview(data) {
               ${activeName ? `${escapeHtml(activeName)} 缓存效率` : "缓存命中效率"}
             </span>
             <span class="pill-badge pill-badge--emerald">
-              ${activeName ? "专属读取" : "读取比例"}
+              ${activeName ? "专属读取" : `${badgeText} 读取比例`}
             </span>
           </div>
           <div>
@@ -682,7 +708,7 @@ function renderOverview(data) {
             <h2>
               <span>Token 流量转换轨道</span>
               <span class="pill-badge pill-badge--blue" style="font-size:10px">
-                ${activeName ? `${escapeHtml(activeName)} 专属流转` : "Pipeline 流转模型"}
+                ${activeName ? `${escapeHtml(activeName)} 专属流转` : `${badgeText} 流转模型`}
               </span>
             </h2>
             <p>${activeName ? `聚焦 ${escapeHtml(activeName)} 从上下文输入到缓存过滤，再到模型生成及最终有效净用量的全透明流转` : "从上下文输入到缓存过滤，再到模型生成及最终有效净用量的全透明流转"}</p>
@@ -815,6 +841,7 @@ function trendPanel(daily, activeAgent = null) {
   const maxVal = Math.max(0, ...daily.map((d) => Number(d.total || 0)));
   const latest = daily[daily.length - 1] || {};
   const aName = activeAgent ? activeAgent.name : null;
+  const rangeDesc = state.range === "1" ? "今日单日脉冲" : state.range === "7" ? "最近 7 天走势" : state.range === "all" ? "全部历史趋势" : "最近 30 天走势";
 
   return `
     <article class="glass-card trend-panel">
@@ -822,7 +849,7 @@ function trendPanel(daily, activeAgent = null) {
         <div class="trend-head">
           <div class="trend-title">
             <h3>
-              <span>每日用量脉冲与趋势${aName ? ` · ${escapeHtml(aName)} 专属` : "（精确到日）"}</span>
+              <span>每日用量脉冲与趋势${aName ? ` · ${escapeHtml(aName)} 专属` : ` · ${rangeDesc}`}</span>
               <span class="status-dot status-dot--live" style="width:6px;height:6px"></span>
             </h3>
             <p>${aName ? `聚焦 ${escapeHtml(aName)} 光标滑动查看单日输入、缓存命中与输出细分（零模糊 60fps 渲染）` : "光标滑动查看任意单日输入、缓存命中与输出细分（零模糊 60fps 渲染）"}</p>
@@ -859,13 +886,16 @@ function trendPanel(daily, activeAgent = null) {
               <text x="5" y="24">${compactNumber(maxVal)}</text>
               <text x="5" y="79">${compactNumber(maxVal * 0.66)}</text>
               <text x="5" y="134">${compactNumber(maxVal * 0.33)}</text>
-              <text x="5" y="188">0</text>
+              <text x="5" y="189">0</text>
             </g>
 
-            <path id="chartArea" fill="url(#chartGradient)" d=""></path>
-            <path id="chartLine" fill="none" stroke="#3B82F6" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" d=""></path>
-            <line id="chartGuide" x1="0" y1="20" x2="0" y2="185" stroke="rgba(59, 130, 246, 0.4)" stroke-dasharray="3 3" opacity="0"></line>
-            <circle id="chartActiveDot" cx="0" cy="0" r="5" fill="#3B82F6" stroke="#FFFFFF" stroke-width="2" opacity="0"></circle>
+            <!-- Gradient Area & Line Path (Interpolated Smooth Spline) -->
+            <path id="chartArea" fill="url(#chartGradient)" d=""/>
+            <path id="chartLine" fill="none" stroke="#3B82F6" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d=""/>
+
+            <!-- Guide Line & Hover Point -->
+            <line id="chartGuide" x1="0" y1="20" x2="0" y2="185" stroke="rgba(59, 130, 246, 0.4)" stroke-dasharray="3 3" opacity="0"/>
+            <circle id="chartActiveDot" cx="0" cy="0" r="5" fill="#3B82F6" stroke="#fff" stroke-width="2" opacity="0"/>
           </svg>
 
           <!-- Floating Tooltip -->
@@ -954,7 +984,9 @@ function renderSplineChart(daily) {
 
   function getSplinePath(pts) {
     if (pts.length === 0) return "";
-    if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
+    if (pts.length === 1) {
+      return `M ${left} ${pts[0].y.toFixed(1)} L ${right} ${pts[0].y.toFixed(1)}`;
+    }
     let path = `M ${pts[0].x.toFixed(1)} ${pts[0].y.toFixed(1)}`;
     for (let i = 0; i < pts.length - 1; i++) {
       const p0 = pts[i === 0 ? 0 : i - 1];
@@ -975,8 +1007,16 @@ function renderSplineChart(daily) {
   const lineD = getSplinePath(points);
   pathLine.setAttribute("d", lineD);
 
-  const areaD = `${lineD} L ${points[points.length - 1].x.toFixed(1)} ${bottom} L ${points[0].x.toFixed(1)} ${bottom} Z`;
+  const areaD = points.length === 1
+    ? `M ${left} ${points[0].y.toFixed(1)} L ${right} ${points[0].y.toFixed(1)} L ${right} ${bottom} L ${left} ${bottom} Z`
+    : `${lineD} L ${points[points.length - 1].x.toFixed(1)} ${bottom} L ${points[0].x.toFixed(1)} ${bottom} Z`;
   pathArea.setAttribute("d", areaD);
+
+  if (points.length === 1) {
+    dot.setAttribute("cx", points[0].x);
+    dot.setAttribute("cy", points[0].y);
+    dot.setAttribute("opacity", "1");
+  }
 
   let rafPending = false;
   container.onmousemove = function (e) {
@@ -1101,11 +1141,12 @@ function rankingPanel(models, agents, activeAgent = null) {
     )
     .join("");
 
+  const rangeDesc = state.range === "1" ? "今日" : state.range === "7" ? "7天" : state.range === "all" ? "全周期" : "30天";
   return `
     <article class="glass-card ranking-panel">
       <div>
         <div class="ranking-head">
-          <h3>模型分布与 API 参考估算${aName ? ` · ${escapeHtml(aName)}` : ""}</h3>
+          <h3>模型分布与 API 参考估算${aName ? ` · ${escapeHtml(aName)}` : ` · ${rangeDesc}`}</h3>
           <span style="font-size:11px;color:var(--text-tertiary)">${aName ? `${escapeHtml(aName)} 维度` : "API 参考估算"}</span>
         </div>
 
@@ -1199,8 +1240,8 @@ function agentCard(agent, lifetime = agent) {
       <div class="agent-total-block">
         <div class="agent-total mono" style="${estimated ? 'color:#D8B4FE' : ''}">${compactNumber(agent.total)}</div>
         <div class="agent-total-meta">
-          <span>${isDimmed ? "范围用量 (非聚焦)" : "范围用量"}</span>
-          <span class="mono">累计 ${compactNumber(lifetime?.total || 0)}</span>
+          <span>${isDimmed ? `${rangeBadgeText(state.range)}用量 (非聚焦)` : `${rangeBadgeText(state.range)}用量`}</span>
+          <span class="mono">全周期 ${compactNumber(lifetime?.total || 0)}</span>
         </div>
       </div>
 
@@ -2457,24 +2498,68 @@ function selectAgent(agent) {
   });
 }
 
+function syncRangeIndicator() {
+  const dot = $("#rangeIndicatorDot");
+  if (dot) {
+    dot.style.background = AGENT_COLORS[state.agent] || "#3B82F6";
+    dot.style.boxShadow = `0 0 8px ${AGENT_COLORS[state.agent] || "#3B82F6"}80`;
+  }
+  const label = $("#currentRangeLabel");
+  if (label) {
+    const rName = rangeBadgeText(state.range);
+    const agentNames = {
+      all: "全量智能体",
+      codex: "Codex 专属",
+      claude: "Claude Code 专属",
+      antigravity: "Antigravity 专属",
+    };
+    const aName = agentNames[state.agent] || `${state.agent} 专属`;
+    label.textContent = `用量观察窗口 · ${rName} · ${aName}`;
+  }
+}
+
+function selectRange(range) {
+  if (!range) range = "30";
+  state.range = range;
+  syncRangePills(range);
+
+  if (elements.main) {
+    elements.main.classList.add("is-filtering");
+  }
+
+  const rName = rangeBadgeText(range);
+  toast(`已切换至 ${rName} 用量观察窗口`);
+
+  loadDashboard({ quiet: true }).finally(() => {
+    if (elements.main) {
+      elements.main.classList.remove("is-filtering");
+    }
+  });
+}
+
+function syncRangePills(range = state.range) {
+  $$("[data-range]").forEach((b) => {
+    b.classList.toggle("is-active", b.dataset.range === range);
+  });
+  syncRangeIndicator();
+}
+
+function setupRangePills() {
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-range]");
+    if (!btn) return;
+    const range = btn.dataset.range || "30";
+    selectRange(range);
+  });
+}
+
 function syncAgentPills(agent = state.agent) {
   $$("[data-agent-filter]").forEach((b) => {
     if (b.tagName === "BUTTON") {
       b.classList.toggle("is-active", (b.dataset.agentFilter || "all") === agent);
     }
   });
-
-  const dot = $("#rangeIndicatorDot");
-  if (dot) {
-    dot.style.background = AGENT_COLORS[agent] || "#3B82F6";
-    dot.style.boxShadow = `0 0 8px ${AGENT_COLORS[agent] || "#3B82F6"}80`;
-  }
-  const label = $("#currentRangeLabel");
-  if (label) {
-    const rName = state.range === "1" ? "今天 (24h)" : state.range === "7" ? "最近 7 天" : state.range === "all" ? "全部历史" : "最近 30 天";
-    const aName = agent === "all" ? "全量智能体" : agent === "codex" ? "Codex 专属" : agent === "claude" ? "Claude Code 专属" : "Antigravity 专属";
-    label.textContent = `用量观察窗口 · ${rName} · ${aName}`;
-  }
+  syncRangeIndicator();
 }
 
 function setupAgentPills() {
@@ -2717,14 +2802,7 @@ function bindEvents() {
     button.addEventListener("click", () => activateTab(button.dataset.tab))
   );
 
-  $$("[data-range]").forEach((button) =>
-    button.addEventListener("click", () => {
-      state.range = button.dataset.range;
-      $$("[data-range]").forEach((item) => item.classList.toggle("is-active", item === button));
-      loadDashboard({ quiet: true });
-    })
-  );
-
+  setupRangePills();
   setupAgentPills();
 
   if (elements.scan) elements.scan.addEventListener("click", requestScan);

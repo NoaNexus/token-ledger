@@ -11,18 +11,18 @@ def _overview_source() -> str:
     return source[start:end]
 
 
-def test_overview_first_kpi_uses_lifetime_summary() -> None:
+def test_overview_first_kpi_reflects_range_and_preserves_lifetime() -> None:
     overview = _overview_source()
     first_card, _ = overview.split("<!-- Card 2:", 1)
 
     assert "const lifetime = data.lifetime?.summary || summary;" in overview
-    assert "全周期累计 Token" in first_card
-    assert "全部历史</span>" in first_card
+    assert "summary.total" in first_card
+    assert "全周期累计" in first_card or "全周期历史累计" in first_card
 
-    for field in ("total", "sessions", "calls", "estimated_total"):
+    for field in ("total", "sessions"):
         assert f"lifetime.{field}" in first_card
-    assert "costQualifier(lifetime)" in first_card
-    assert "costInlineText(lifetime)" in first_card
+    assert "costQualifier(summary)" in first_card
+    assert "costInlineText(summary)" in first_card
 
 
 def test_overview_agent_accumulated_badges_still_use_lifetime_data() -> None:

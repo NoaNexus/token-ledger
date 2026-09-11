@@ -1,6 +1,6 @@
 # toekn用量统计
 
-Windows 本地优先的 AI Agent 用量查看器，使用 PyQt5 / Qt WebEngine 展示本地索引中的 Codex、Claude Code 和 Antigravity 用量。当前版本：2.4.5。
+Windows 本地优先的 AI Agent 用量查看器，使用 PyQt5 / Qt WebEngine 展示本地索引中的 Codex、Claude Code 和 Antigravity 用量。当前版本：2.4.6。
 
 ## 启动
 
@@ -14,7 +14,7 @@ python native_app.py
 ```
 
 浏览器模式：`python -m tokenledger`。只扫描：`python -m tokenledger --scan-only`。
-本地服务仅用于环回访问；指定端口被占用时改用系统分配端口，不终止占用进程、不信任未知服务。桌面运行期间约每 60 秒触发增量扫描；扫描任务不会重叠。
+本地服务仅用于环回访问；指定端口被占用时改用系统分配端口，不终止占用进程、不信任未知服务。桌面启动时自动触发单次增量扫描，后续交由界面手动按需触发；扫描任务不会重叠。
 
 数据默认保存在 `%LOCALAPPDATA%\TokenLedger\token-ledger.db`。可用 `TOKEN_LEDGER_DATA_DIR`、`TOKEN_LEDGER_USER_HOME` 或 CLI 参数指定数据与来源目录。
 
@@ -48,4 +48,4 @@ python -m pytest -q
 python -m PyInstaller --noconfirm --clean TokenLedgerNative.spec
 ```
 
-[发布说明](docs/RELEASE_NOTES_v2.4.5.md) · [开发交接](docs/CODEX_HANDOVER.md) · [对账口径](docs/TOKEN_RECONCILIATION_UPGRADE.md)
+[发布说明](docs/RELEASE_NOTES_v2.4.6.md) · [开发交接](docs/CODEX_HANDOVER.md) · [对账口径](docs/TOKEN_RECONCILIATION_UPGRADE.md)

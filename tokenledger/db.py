@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS usage_events (
     usage_scope TEXT NOT NULL DEFAULT 'session',
     call_count INTEGER NOT NULL DEFAULT 1
 );
+CREATE INDEX IF NOT EXISTS idx_usage_file_id ON usage_events(file_id);
 CREATE INDEX IF NOT EXISTS idx_usage_time ON usage_events(occurred_at);
 CREATE INDEX IF NOT EXISTS idx_usage_agent ON usage_events(agent);
 CREATE INDEX IF NOT EXISTS idx_usage_agent_time ON usage_events(agent, occurred_at);
@@ -105,6 +106,9 @@ class TokenDatabase:
                 connection.execute(
                     "ALTER TABLE usage_events ADD COLUMN call_count INTEGER NOT NULL DEFAULT 1"
                 )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_usage_file_id ON usage_events(file_id)"
+            )
             # Discard legacy derived metadata, not usage history. Older releases
             # persisted conversation titles and fabricated quota fallbacks.
             if not connection.execute("SELECT 1 FROM app_meta WHERE key='migration:2.4.3'").fetchone():
